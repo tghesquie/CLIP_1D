@@ -1,8 +1,8 @@
 import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
-from bulk_damage import BulkDamage
 
+from bulk_damage import BulkDamage
 
 class EquilibriumSolver:
     """
@@ -103,6 +103,7 @@ class EquilibriumSolver:
         Updates or constructs the Lagrange-Lagrange interaction matrix K_ll.
         """
         # Compute matrix values based on damage and stiffness parameter
+       
         data = -d / self.params.k
         
         # Create or update the K_ll matrix
@@ -370,6 +371,33 @@ class ClipFunctional:
         else:
             return jac_clip_functional
         
+    def dissipation_act_bulk_coh(self,strain_str, stress_fun_str, jump_fun_str):
+        
+        
+        step_elem_strain = np.array(strain_str)
+        step_stress = np.array(stress_fun_str)
+       
+        totalbulkdisp = 0.
+        total_bulk_str = []
+        sigm = (step_stress[1:] + step_stress[:-1])/2.
+                    
+        for ie in range(step_elem_strain.shape[1]):
+                deps = step_elem_strain[1:,ie] - step_elem_strain[:-1,ie]
+                bulkdispe = self.params.dx*np.sum(deps*sigm)                                                        
+                totalbulkdisp += bulkdispe
+                total_bulk_str.append(bulkdispe)
+        
+        step_w = np.array(jump_fun_str)
+        totalcohesivedisp = 0
+        total_cohesive_str = []
+        for ie in range(step_w.shape[1]):
+            dstepw = step_w[1:, ie] - step_w[:-1, ie]
+            cohesivedispe = np.sum(dstepw*sigm)
+            totalcohesivedisp += cohesivedispe
+            total_cohesive_str.append(cohesivedispe)
+        
+    
+        return totalcohesivedisp,totalbulkdisp
 
 
 class Solver:
@@ -381,6 +409,7 @@ class Solver:
         self.bulk_damage = BulkDamage(simulation_parameters.lc, simulation_parameters.Dm, simulation_parameters.get_len_mat(simulation_parameters.x))
         self.equilibrium_solver = EquilibriumSolver(model, simulation_parameters)
         self.functional = ClipFunctional(model, simulation_parameters, self.bulk_damage)
+        
         
 
 

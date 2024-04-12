@@ -1,6 +1,5 @@
 import numpy as np
 import scipy.sparse
-from scipy.optimize import approx_fprime
 
 class BulkDamage:
     def __init__(self, lc, Dm, len_mat):

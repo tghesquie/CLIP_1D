@@ -13,6 +13,12 @@ class Dumper:
             "functional": [],
             "cohesive_stress": [],
             "strain": [],
+            "cohesive_dissip_expected": [],
+            "bulk_dissip_expected": [],
+            "total_dissip_expected":[],
+            "cohesive_dissip_actual": [],
+            "bulk_dissip_actual": [],
+            "total_dissip_actual" : [],
         }
         
     def store(self, key, value):
