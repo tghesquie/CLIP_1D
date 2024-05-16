@@ -2,7 +2,7 @@ import numpy as np
 
 class Simulation_Parameters:
     
-    def __init__(self, E, Gc, sigc, L, Dm, alpha, beta, he, choice ,N_increments, max_iter ):
+    def __init__(self, E, Gc, sigc, L, Dm, alpha, beta, he, functional_choice, damage_function, N_increments, max_iter ):
 
         self.E = E  # Young's Modulus (Pa)
         self.Gc = Gc  # Fracture Energy (N/m)
@@ -12,13 +12,13 @@ class Simulation_Parameters:
         self.Dm = Dm  # Bulk Damage parameter
         self.N_increments = N_increments  # Number of increments
         self.max_iter = max_iter  # Maximum number of iterations
-        self.alpha = alpha  # G function - Co-efficients
-        self.beta = beta # H- function - Co-efficients
+        self.alpha = alpha  
+        self.beta = beta 
         self.alpha_values = None
         self.Dm_values = None
-        self.choice_values = None
+        self.damage_function = damage_function
 
-        self.choice = choice # Choice for the G and H function
+        self.functional_choice = functional_choice
         self.he = he # Nodes per characteristic length
         
         # Derived parameters
@@ -32,7 +32,7 @@ class Simulation_Parameters:
         self.gamma = self.lc / self.lch  # lambda
 
         self.beta_1 = self.beta
-        self.k = self.E / self.lch  # k
+        self.k = self.sigc / self.wc
 
         self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate
         self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
@@ -52,3 +52,21 @@ class Simulation_Parameters:
         exact_inc = [0,(self.sigc * self.L)/self.E,self.wc]
 
         return exact_inc, exact_f
+
+    def to_dict(self):
+        
+        return {
+            'E': self.E,
+            'Gc': self.Gc,
+            'sigc': self.sigc,
+            'L': self.L,
+            'Dm': self.Dm,
+            'alpha': self.alpha,
+            'beta': self.beta,
+            'he': self.he,
+            'functional_choice': self.functional_choice,
+            'damage_function': self.damage_function,
+            'N_elements': self.N_elements,
+            'N_increments': self.N_increments,
+            'max_iter': self.max_iter
+        }

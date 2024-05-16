@@ -4,11 +4,14 @@ import scipy.sparse.linalg
 
 from bulk_damage import BulkDamage
 
+################################################################
+
 class EquilibriumSolver:
     """
     Solves the equilibrium equations for a cohesive and bulk damage simulation.
     Manages the construction and manipulation of stiffness matrices and force vectors.
     """
+
     def __init__(self, model, simulation_parameters):
         """
         Initializes the solver with material and simulation parameters.
@@ -233,51 +236,8 @@ class EquilibriumSolver:
         
         return resx, resL_b, resL_n, K
 
-class EquilibriumSolver_Lip:
-    """
-    Solves the equilibrium equations for the LIP model.
-    Manages the construction and manipulation of stiffness matrices and force vectors.
-    """
+class ClipFunctional_4_terms:
 
-    def __init__(self,model, simulation_parameters):
-        """
-        Initializes the solver with material and simulation parameters.
-        """
-        self.model = model
-        self.params = simulation_parameters
-    
-    def B_matrix(self,):
-        return -1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v) +1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v,1)
-    
-    def d2e_eps_deps2(self, d) : 
-        return self.params.dx*scipy.sparse.diags(self.params.E*self.model.GD_bulk.get_Value(d))
-
-    def K_uu(self,d):
-        B = self.B_matrix()
-        return B.T.dot(self.d2e_eps_deps2(d).dot(B))
-    
-    def solve_equilibrium_ul(self, d, imposed_displacements):
-        Kuu = self.K_uu(d)
-        n,n =Kuu.shape
-        Fu = scipy.sparse.coo_matrix((n,1), dtype = float)
-
-        nc = len(imposed_displacements)
-        I =    np.array( list(imposed_displacements.keys()))
-        J =    np.array( list(range(nc)))
-        Bval = np.ones(nc, dtype ='float')
-        Kul = scipy.sparse.coo_matrix((Bval, (I,J)), shape = (n,nc))
-        K  = scipy.sparse.bmat([[Kuu, Kul],[Kul.T, None]], format='csr')            
-        Fl = np.array([ [v] for v in imposed_displacements.values()], dtype ='float')
-        F  = scipy.sparse.vstack([Fu, Fl], format ='csr' )
-
-        u  = scipy.sparse.linalg.spsolve(K,F)
-        res = {}    
-        res['x'] = u[:n]
-        res['L'] = -u[n:]
-        res['nit'] = 1
-        return res['x'], res['L']
-
-class Functional:
     def __init__(self, model, simulation_parameters, bulk_damage):
         """
         Initializes the ClipFunctional with a model for material behaviors and simulation parameters.
@@ -295,12 +255,6 @@ class Functional:
         """
         # Calculate the strain based on the displacement field
         return (u[1::2] - u[:-1:2]) / self.params.dx
-    
-    def get_strain_lip(self,u) :
-        """
-        Calculates the strain for a given displacement field.
-        """
-        return (u[1:] - u[:-1])/ self.params.dx
     
     def get_jump(self, u):
         """
@@ -366,10 +320,10 @@ class Functional:
         term3 = 1/(2 * self.params.k) * (self.model.gd_cohesive.get_lmb_value(d)).dot(lambda_**2)
         return term1, term2, term3
     
-    def get_cohesive_energy_lagrange_derivative(self, lambda_,d):
+    def get_cohesive_energy_lagrange_derivative(self, lambda_):
         return 1/(2 * self.params.k) * (lambda_**2) * (self.model.gd_cohesive.get_derivative_lmb_value(d))
 
-    def assemble_clip_functional_4_terms(self, d, D_center, u, lambda_, returnall = False):
+    def assemble_clip_functional(self, d, D_center, u, lambda_, returnall = False):
         """
         Assemble the functional to minimize
         """
@@ -387,14 +341,14 @@ class Functional:
         else:
             return clip_functional
         
-    def assemble_jac_clip_functional_4_terms(self, d, D_center, u, lambda_, returnall = False):
+    def assemble_jac_clip_functional(self, d, D_center, u, lambda_, returnall = False):
         """
         Assemble the jacobian of the functional to minimize
         """
         strain = self.get_strain(u)
         
         d_strain_energy = self.get_strain_energy_derivative(strain, D_center)
-        d_ce_term3 = self.get_cohesive_energy_lagrange_derivative(lambda_,d)
+        d_ce_term3 = self.get_cohesive_energy_lagrange_derivative(lambda_)
         d_bulk_dissipation = self.get_bulk_dissipation_derivative(D_center)
         d_cohesive_dissipation = self.get_cohesive_dissipation_derivative(d)
         dD_center = self.bulk_damage.get_dBulk_damage_dd(d)
@@ -405,102 +359,6 @@ class Functional:
         else:
             return jac_clip_functional
         
-    def assemble_clip_functional_3_terms(self, d, D_center, u, lambda_, returnall = False):
-        """
-        Assemble the functional to minimize
-        """
-        strain = self.get_strain(u)
-        u_jump = self.get_jump(u)
-
-        strain_energy = self.get_strain_energy(strain, D_center)
-        ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(u_jump, lambda_, d)
-        cohesive_dissipation = self.get_cohesive_dissipation(d)
-
-        clip_functional = strain_energy - ce_term1 + ce_term2 - ce_term3  + cohesive_dissipation 
-        if returnall:
-            return clip_functional, strain_energy, ce_term1, ce_term2, ce_term3, cohesive_dissipation
-        else:
-            return clip_functional
-        
-    def assemble_jac_clip_functional_3_terms(self, d, D_center, u, lambda_, returnall = False):
-        """
-        Assemble the jacobian of the functional to minimize
-        """
-        strain = self.get_strain(u)
-        
-        d_strain_energy = self.get_strain_energy_derivative(strain, D_center)
-        d_ce_term3 = self.get_cohesive_energy_lagrange_derivative(lambda_,d)
-        d_cohesive_dissipation = self.get_cohesive_dissipation_derivative(d)
-        dD_center = self.bulk_damage.get_dBulk_damage_dd(d)
-
-        jac_clip_functional = dD_center.T.dot(d_strain_energy) - d_ce_term3 + d_cohesive_dissipation
-        if returnall:
-            return jac_clip_functional, d_strain_energy, d_ce_term3, d_cohesive_dissipation
-        else:
-            return jac_clip_functional
-        
-    def assemble_czm_functional(self, d,D_pseudo_czm, u, lambda_, returnall = False):
-        """
-        Assemble the functional to minimize
-        """
-        strain = self.get_strain(u)
-        u_jump = self.get_jump(u)
-
-        strain_energy = self.get_strain_energy(strain,D_pseudo_czm)
-        ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(u_jump, lambda_, d)
-        cohesive_dissipation = self.get_cohesive_dissipation(d)
-       
-
-        czm_functional = strain_energy - ce_term1 + ce_term2 - ce_term3  + cohesive_dissipation 
-        if returnall:
-            return czm_functional, strain_energy, ce_term1, ce_term2, ce_term3, cohesive_dissipation
-        else:
-            return czm_functional
-        
-    def assemble_jac_czm_functional(self, d, lambda_, returnall = False):
-        """
-        Assemble the jacobian of the functional to minimize
-        """       
-       
-        d_ce_term3 = self.get_cohesive_energy_lagrange_derivative(lambda_,d)
-        d_cohesive_dissipation = self.get_cohesive_dissipation_derivative(d)
-        
-        jac_czm_functional = - d_ce_term3 + d_cohesive_dissipation
-        if returnall:
-            return jac_czm_functional, d_ce_term3, d_cohesive_dissipation
-        else:
-            return jac_czm_functional
-        
-    def assemble_lip_functional(self, D, u, returnall = False):
-        """
-        Assemble the functional to minimize
-        """
-        strain = self.get_strain_lip(u)
-       
-        strain_energy = self.get_strain_energy(strain,D)
-        
-        bulk_dissipation = self.get_bulk_dissipation(D)
-       
-        lip_functional = strain_energy  + bulk_dissipation 
-        if returnall:
-            return lip_functional, strain_energy,  bulk_dissipation
-        else:
-            return lip_functional
-        
-    def assemble_jac_lip_functional(self, D, u, returnall = False):
-        """
-        Assemble the jacobian of the functional to minimize
-        """
-        strain = self.get_strain_lip(u)
-        d_strain_energy = self.get_strain_energy_derivative(strain, D)
-        d_bulk_dissipation = self.get_bulk_dissipation_derivative(D)
-
-        jac_clip_functional = (d_strain_energy + d_bulk_dissipation)
-        if returnall:
-            return jac_clip_functional, d_strain_energy, d_bulk_dissipation
-        else:
-            return jac_clip_functional
-
     def dissipation_act_bulk_coh(self,strain_str, stress_fun_str, jump_fun_str):
         
         step_elem_strain = np.array(strain_str)
@@ -528,7 +386,7 @@ class Functional:
     
         return totalcohesivedisp,totalbulkdisp
 
-class Solver:
+class Solver_4_terms:
     """
     Coordinates the solution of the equilibrium equations and damage evolution.
     """
@@ -536,61 +394,22 @@ class Solver:
     def __init__(self, model, simulation_parameters):
         self.bulk_damage = BulkDamage(simulation_parameters.lc, simulation_parameters.Dm, simulation_parameters.get_len_mat(simulation_parameters.x))
         self.equilibrium_solver = EquilibriumSolver(model, simulation_parameters)
-        self.equilibrium_solver_lip = EquilibriumSolver_Lip(model, simulation_parameters)
-        self.functional = Functional(model, simulation_parameters, self.bulk_damage)
-        self.params = simulation_parameters
+        self.functional = ClipFunctional_4_terms(model, simulation_parameters, self.bulk_damage)
+
         
     def clip_functional(self, d, bc):
-        if self.params.functional_choice == 'CLIP-3terms':
-            D_center = self.bulk_damage.get_Bulk_damage(d)
+        D_center = self.bulk_damage.get_Bulk_damage(d)
+        u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
 
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-        
-            clip_functional = self.functional.assemble_clip_functional_3_terms(d, D_center, u_, lambda_)
-            
-        elif self.params.functional_choice == 'CLIP-4terms':
-            D_center = self.bulk_damage.get_Bulk_damage(d)
-
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-        
-            clip_functional = self.functional.assemble_clip_functional_4_terms(d, D_center, u_, lambda_)
-        
-        elif self.params.functional_choice == 'CZM':
-            D_pseudo_czm = (np.concatenate([np.ones(1), np.ones_like(d)]))
-
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)
-        
-            
-            clip_functional = self.functional.assemble_czm_functional(d, D_pseudo_czm, u_, lambda_)
-        
-        else:
-            print("Invalid functional choice")
-
+        clip_functional = self.functional.assemble_clip_functional(d, D_center, u_, lambda_)
         return clip_functional
     
 
     def jac_clip_functional(self, d, bc):
-        
+        D_center = self.bulk_damage.get_Bulk_damage(d)
+        u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
 
-        if self.params.functional_choice == 'CLIP-3terms': 
-            D_center = self.bulk_damage.get_Bulk_damage(d)
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-            jac_clip_functional = self.functional.assemble_jac_clip_functional_3_terms(d, D_center, u_, lambda_)
-                
-        elif self.params.functional_choice == 'CLIP-4terms':
-            D_center = self.bulk_damage.get_Bulk_damage(d)
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-            jac_clip_functional = self.functional.assemble_jac_clip_functional_4_terms(d, D_center, u_, lambda_)
-
-        elif self.params.functional_choice == 'CZM':
-            D_pseudo_czm =(np.concatenate([np.ones(1), np.ones_like(d)]))
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)
-            
-            jac_clip_functional = self.functional.assemble_jac_czm_functional(d, lambda_)
-        
-        else :
-            print("Invalid functional choice")
-
+        jac_clip_functional = self.functional.assemble_jac_clip_functional(d, D_center, u_, lambda_)
         return jac_clip_functional
 
     
@@ -614,28 +433,186 @@ class Solver:
             print("Optimization failed")
         return damage_opt
     
+class ClipFunctional_3_terms:
 
+    def __init__(self, model, simulation_parameters, bulk_damage):
+        """
+        Initializes the ClipFunctional with a model for material behaviors and simulation parameters.
+        
+        :param model: An instance of the Model class.
+        :param simulation_parameters: An instance containing simulation parameters.
+        """
+        self.model = model
+        self.params = simulation_parameters
+        self.bulk_damage = bulk_damage
+
+    def get_strain(self, u):
+        """
+        Calculates the strain for a given displacement field.
+        """
+        # Calculate the strain based on the displacement field
+        return (u[1::2] - u[:-1:2]) / self.params.dx
     
-    def  lip_functional(self, D, u_, low_bound):
+    def get_jump(self, u):
+        """
+        Calculates the jump in displacement for a given displacement field.
+        """
+        # Calculate the jump in displacement based on the displacement field
+        return u[2:-1:2] - u[1:-2:2]
 
-        functional = lambda D:self.functional.assemble_lip_functional(D,u_)
-        jacob = lambda D: self.functional.assemble_jac_lip_functional(D,u_)
+    def get_strain_energy(self, strain, D_center):
+        """
+        Calculates the strain energy for the given strain and damage state.
+        """
+        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_Value(D_center).dot(strain**2))
+    
+    def get_strain_energy_derivative(self, strain, D_center):
+        """
+        Calculates the derivative of strain energy with respect to damage.
+        """
+        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_First_derivative(D_center) * (strain**2))
+    
+    def get_cohesive_energy(self, u_jump, d):
+        """
+        Calculates the cohesive energy for the given jump in displacement and damage state.
+        """
+        return 0.5 * self.params.k * (self.model.gd_cohesive.get_Value(d).dot(u_jump**2))
+        
+    def get_cohesive_energy_derivative(self, u_jump, d):
+        """
+        Calculates the derivative of cohesive energy with respect to jump in displacement.
+        """
+        return 0.5 * self.params.k * (self.model.gd_cohesive.get_First_derivative(d) * (u_jump**2))
+    
+    def get_cohesive_dissipation(self, d):
+        """
+        Calculates the cohesive energy dissipation for the given damage state.
+        """
+        return np.sum(self.params.yc * self.model.hd_cohesive.get_Value(d))
+    
+    def get_cohesive_dissipation_derivative(self, d):
+        """
+        Calculates the derivative of cohesive energy dissipation with respect to damage.
+        """
+        return self.params.yc * self.model.hd_cohesive.get_First_derivative(d)
+    
+    def get_cohesive_energy_lagrange(self, u_jump, lambda_, d):
+        """
+        Calculates the cohesive energy when using Lagrange multipliers in the formulation.
+        """
+        term1 = 0.5 * self.params.k * np.sum(u_jump**2)
+        term2 = np.dot(lambda_, u_jump)
+        term3 = 1/(2 * self.params.k) * (self.model.gd_cohesive.get_lmb_value(d)).dot(lambda_**2)
+        return term1, term2, term3
+    
+    def get_cohesive_energy_lagrange_derivative(self, lambda_, d):
+        
+        return 1/(2 * self.params.k) * (lambda_**2) * (self.model.gd_cohesive.get_derivative_lmb_value(d))
 
-        A = scipy.sparse.eye(self.params.N_v-2,self.params.N_v-1) - scipy.sparse.eye(self.params.N_v-2,self.params.N_v-1,1)           
-        slopeconstrain = scipy.optimize.LinearConstraint(A, -self.params.dx/self.params.lc *np.ones(self.params.N_v-2), self.params.dx/self.params.lc*np.ones(self.params.N_v-2) )
+    def assemble_clip_functional(self, d, D_center, u, lambda_, returnall = False):
+        """
+        Assemble the functional to minimize
+        """
+        strain = self.get_strain(u)
+        u_jump = self.get_jump(u)
 
-        bounds = scipy.optimize.Bounds(low_bound,np.ones(len(D)))
+        strain_energy = self.get_strain_energy(strain, D_center)
+        ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(u_jump, lambda_, d)
+        cohesive_dissipation = self.get_cohesive_dissipation(d)
+       
 
-        damage_predictor_opt = scipy.optimize.minimize(
-            fun=functional,
-            x0=D,
-            bounds=bounds ,            
-            method = 'SLSQP',         
-            constraints=slopeconstrain,
-            jac =jacob
-            )
+        clip_functional = strain_energy - ce_term1 + ce_term2 - ce_term3  + cohesive_dissipation 
+        if returnall:
+            return clip_functional, strain_energy, ce_term1, ce_term2, ce_term3, cohesive_dissipation
+        else:
+            return clip_functional
+        
+    def assemble_jac_clip_functional(self, d, D_center, u, lambda_, returnall = False):
+        """
+        Assemble the jacobian of the functional to minimize
+        """
+        strain = self.get_strain(u)
+        
+        d_strain_energy = self.get_strain_energy_derivative(strain, D_center)
+        d_ce_term3 = self.get_cohesive_energy_lagrange_derivative(lambda_,d)
+        d_cohesive_dissipation = self.get_cohesive_dissipation_derivative(d)
+        dD_center = self.bulk_damage.get_dBulk_damage_dd(d)
+
+        jac_clip_functional = dD_center.T.dot(d_strain_energy ) - d_ce_term3 + d_cohesive_dissipation
+        if returnall:
+            return jac_clip_functional, d_strain_energy, d_ce_term3, d_cohesive_dissipation
+        else:
+            return jac_clip_functional
+        
+    def dissipation_act_bulk_coh(self,strain_str, stress_fun_str, jump_fun_str):
+        
+        step_elem_strain = np.array(strain_str)
+        step_stress = np.array(stress_fun_str)
+       
+        totalbulkdisp = 0.
+        
+        sigm = (step_stress[1:] + step_stress[:-1])/2.
+                    
+        for ie in range(step_elem_strain.shape[1]):
+                deps = step_elem_strain[1:,ie] - step_elem_strain[:-1,ie]
+                bulkdispe = self.params.dx*np.sum(deps*sigm)                                                        
+                totalbulkdisp += bulkdispe
                 
-        if not damage_predictor_opt.success :
-            print("Optimisation failed")
-        return damage_predictor_opt
+        step_w = np.array(jump_fun_str)
+        totalcohesivedisp = 0
+        total_cohesive_str = []
+        for ie in range(step_w.shape[1]):
+            dstepw = step_w[1:, ie] - step_w[:-1, ie]
+            cohesivedispe = np.sum(dstepw*sigm)
+            totalcohesivedisp += cohesivedispe
+            total_cohesive_str.append(cohesivedispe)
+
+        return totalcohesivedisp,totalbulkdisp
+
+class Solver_3_terms:
+    """
+    Coordinates the solution of the equilibrium equations and damage evolution.
+    """
+
+    def __init__(self, model, simulation_parameters):
+        self.bulk_damage = BulkDamage(simulation_parameters.lc, simulation_parameters.Dm, simulation_parameters.get_len_mat(simulation_parameters.x))
+        self.equilibrium_solver = EquilibriumSolver(model, simulation_parameters)
+        self.functional = ClipFunctional_3_terms(model, simulation_parameters, self.bulk_damage)
+
+        
+    def clip_functional(self, d, bc):
+        D_center = self.bulk_damage.get_Bulk_damage(d)
+        u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
+
+        clip_functional = self.functional.assemble_clip_functional(d, D_center, u_, lambda_)
+        return clip_functional
     
+
+    def jac_clip_functional(self, d, bc):
+        D_center = self.bulk_damage.get_Bulk_damage(d)
+        u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
+
+        jac_clip_functional = self.functional.assemble_jac_clip_functional(d, D_center, u_, lambda_)
+        return jac_clip_functional
+
+    
+    def solve_functional(self, d, d_prev, bc):
+        """
+        Solves the functional for the given damage state and boundary conditions.
+        """
+        
+        functional = lambda damage : self.clip_functional(damage, bc)
+        jacobian = lambda damage : self.jac_clip_functional(damage, bc)
+        bounds = scipy.optimize.Bounds(d_prev, np.ones(len(d_prev)))
+
+        damage_opt = scipy.optimize.minimize(
+            fun = functional,
+            jac = jacobian,
+            x0 = d,
+            bounds = bounds,
+            method = 'SLSQP'
+        )
+        if not damage_opt.success:
+            print("Optimization failed")
+        return damage_opt
+
