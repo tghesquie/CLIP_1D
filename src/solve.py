@@ -246,19 +246,19 @@ class EquilibriumSolver_Lip:
         self.model = model
         self.params = simulation_parameters
     
-    def B_matrix(self,):
+    def get_B(self,):
         return -1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v) +1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v,1)
     
     def d2e_eps_deps2(self, d) : 
         return self.params.dx*scipy.sparse.diags(self.params.E*self.model.GD_bulk.get_Value(d))
 
     def K_uu(self,d):
-        B = self.B_matrix()
+        B = self.get_B()
         return B.T.dot(self.d2e_eps_deps2(d).dot(B))
     
     def solve_equilibrium_ul(self, d, imposed_displacements):
         Kuu = self.K_uu(d)
-        n,n =Kuu.shape
+        n,n = Kuu.shape
         Fu = scipy.sparse.coo_matrix((n,1), dtype = float)
 
         nc = len(imposed_displacements)
@@ -271,10 +271,7 @@ class EquilibriumSolver_Lip:
         F  = scipy.sparse.vstack([Fu, Fl], format ='csr' )
 
         u  = scipy.sparse.linalg.spsolve(K,F)
-        res = {}    
-        res['x'] = u[:n]
-        res['L'] = -u[n:]
-        res['nit'] = 1
+        res = {'x': u[:n], 'L': -u[n:], 'nit': 1}
         return res['x'], res['L']
 
 class Functional:
@@ -540,37 +537,30 @@ class Solver:
         self.functional = Functional(model, simulation_parameters, self.bulk_damage)
         self.params = simulation_parameters
         
-    def clip_functional(self, d, bc):
+    def clip_czm_functional(self, d, bc):
+
         if self.params.functional_choice == 'CLIP-3terms':
             D_center = self.bulk_damage.get_Bulk_damage(d)
-
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-        
+            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)        
             clip_functional = self.functional.assemble_clip_functional_3_terms(d, D_center, u_, lambda_)
             
         elif self.params.functional_choice == 'CLIP-4terms':
             D_center = self.bulk_damage.get_Bulk_damage(d)
-
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)
-        
+            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)        
             clip_functional = self.functional.assemble_clip_functional_4_terms(d, D_center, u_, lambda_)
         
         elif self.params.functional_choice == 'CZM':
             D_pseudo_czm = (np.concatenate([np.ones(1), np.ones_like(d)]))
-
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)
-        
-            
+            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)      
             clip_functional = self.functional.assemble_czm_functional(d, D_pseudo_czm, u_, lambda_)
         
         else:
-            print("Invalid functional choice")
+           raise ValueError("Invalid functional choice")
 
         return clip_functional
     
 
-    def jac_clip_functional(self, d, bc):
-        
+    def jac_functional(self, d, bc):        
 
         if self.params.functional_choice == 'CLIP-3terms': 
             D_center = self.bulk_damage.get_Bulk_damage(d)
@@ -584,12 +574,11 @@ class Solver:
 
         elif self.params.functional_choice == 'CZM':
             D_pseudo_czm =(np.concatenate([np.ones(1), np.ones_like(d)]))
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)
-            
+            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)            
             jac_clip_functional = self.functional.assemble_jac_czm_functional(d, lambda_)
         
         else :
-            print("Invalid functional choice")
+            raise ValueError("Invalid functional choice")
 
         return jac_clip_functional
 
@@ -599,8 +588,8 @@ class Solver:
         Solves the functional for the given damage state and boundary conditions.
         """
         
-        functional = lambda damage : self.clip_functional(damage, bc)
-        jacobian = lambda damage : self.jac_clip_functional(damage, bc)
+        functional = lambda damage : self.clip_czm_functional(damage, bc)
+        jacobian = lambda damage : self.jac_functional(damage, bc)
         bounds = scipy.optimize.Bounds(d_prev, np.ones(len(d_prev)))
 
         damage_opt = scipy.optimize.minimize(
@@ -611,7 +600,7 @@ class Solver:
             method = 'SLSQP'
         )
         if not damage_opt.success:
-            print("Optimization failed")
+           raise RuntimeError("Optimization failed")
         return damage_opt
     
 
@@ -620,10 +609,8 @@ class Solver:
 
         functional = lambda D:self.functional.assemble_lip_functional(D,u_)
         jacob = lambda D: self.functional.assemble_jac_lip_functional(D,u_)
-
         A = scipy.sparse.eye(self.params.N_v-2,self.params.N_v-1) - scipy.sparse.eye(self.params.N_v-2,self.params.N_v-1,1)           
         slopeconstrain = scipy.optimize.LinearConstraint(A, -self.params.dx/self.params.lc *np.ones(self.params.N_v-2), self.params.dx/self.params.lc*np.ones(self.params.N_v-2) )
-
         bounds = scipy.optimize.Bounds(low_bound,np.ones(len(D)))
 
         damage_predictor_opt = scipy.optimize.minimize(
@@ -636,6 +623,6 @@ class Solver:
             )
                 
         if not damage_predictor_opt.success :
-            print("Optimisation failed")
+            raise RuntimeError("Optimization failed")
         return damage_predictor_opt
     

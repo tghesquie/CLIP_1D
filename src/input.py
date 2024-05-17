@@ -13,11 +13,9 @@ class Simulation_Parameters:
         self.N_increments = N_increments  # Number of increments
         self.max_iter = max_iter  # Maximum number of iterations
         self.alpha = alpha  
-        self.beta = beta 
-        self.alpha_values = None
-        self.Dm_values = None
-        self.damage_function = damage_function
+        self.beta = beta
 
+        self.damage_function = damage_function
         self.functional_choice = functional_choice
         self.he = he # Nodes per characteristic length
         
@@ -29,9 +27,9 @@ class Simulation_Parameters:
         self.wc = (2 * self.Gc) / self.sigc  # Critical Separation
         self.lc = self.L / 4  # Characteristic length
         self.lch = (self.E * self.Gc) / (self.sigc ** 2)  # Cohesive zone length
-        self.gamma = self.lc / self.lch  # lambda
+        self.gamma = self.lc / self.lch  # gamma
 
-        self.beta_1 = self.beta
+        self.beta_1 = self.beta # Dissipation parameter
         self.k = self.sigc / self.wc
 
         self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate

@@ -1,3 +1,4 @@
+""" Main file"""
 import numpy as np
 import os
 import uuid
@@ -7,8 +8,7 @@ from functions import Functions_4_terms, Functions_3_terms,Functions_CZM,Functio
 from bulk_damage import BulkDamage
 from solve import Solver
 
-
-def initialize_parameters(Dm = None,alpha = None,beta = None):
+def initialize_parameters(damage_function = None, Dm = None, alpha = None, beta = None):
     return Simulation_Parameters(E, Gc, sigc, L, Dm, alpha, beta, he, functional_choice, damage_function, N_increments, max_iter)
 
 def generate_filename(base="results"):
@@ -22,7 +22,10 @@ def main_clip_4_terms(parameters, incs) :
     """
     Main for the CLIP functional with 4 terms
     """
-    exact_inc, exact_f = parameters.pure_czm()
+    print("------------------------------------------------")
+    print("Start :", parameters.functional_choice,"Dm = ", parameters.Dm)
+    print("------------------------------------------------")
+
     N_elements = parameters.N_elements
 
     u = np.zeros(2 * N_elements)
@@ -44,12 +47,13 @@ def main_clip_4_terms(parameters, incs) :
     bulk_damage_str = []
     lambda_str = []
 
-    cde_str = []
-    cda_str = []
-    bde_str = []
-    bda_str = []
-    tda_str = []
-    tde_str = []
+    num_incs = len(incs)
+    cde_str = np.zeros(num_incs)
+    cda_str = np.zeros(num_incs)
+    bde_str = np.zeros(num_incs)
+    bda_str = np.zeros(num_incs)
+    tda_str = np.zeros(num_incs)
+    tde_str = np.zeros(num_incs)
 
     for i, u_t in enumerate(incs):
 
@@ -62,7 +66,8 @@ def main_clip_4_terms(parameters, incs) :
         else :
             d_prev = d.copy()
 
-        print("--------------------------------", i)
+        print("--------------------------------")
+        print("Increment : ",i , "ut =",u_t)
 
         results = solver.solve_functional(d,d_prev,bc)
         d  = results.x
@@ -85,12 +90,12 @@ def main_clip_4_terms(parameters, incs) :
 
         cda,bda = solver.functional.dissipation_act_bulk_coh(strain_str,stress_str,jump_str)
 
-        cde_str.append(cde)
-        cda_str.append(cda)
-        bde_str.append(bde)
-        bda_str.append(bda)
-        tda_str.append(cda + bda)
-        tde_str.append(cde + bde)
+        cde_str[i] = cde
+        cda_str[i] = cda
+        bda_str[i] = bda
+        tda_str[i] = cda + bda
+        tde_str[i] = cde
+        
 
     filename = generate_filename()
     np.savez(filename, imposed_disp = incs, stress = stress_str, seperation = jump_str,
@@ -98,14 +103,20 @@ def main_clip_4_terms(parameters, incs) :
             lmb = lambda_str, strain = strain_str,
             coh_disp_act = cda_str, bulk_disp_act = bda_str, tot_disp_act = tda_str, 
             coh_disp_exp = cde_str, bulk_disp_exp = bde_str, tot_disp_exp = tde_str,
-            exact_stress = exact_f, exact_seperation = exact_inc)
+            )
+    
+    print("------------------------------------------------")
+    print("End :", parameters.functional_choice,"Dm = ", parameters.Dm)
+    print("------------------------------------------------")
 
 def main_clip_3_terms(parameters, incs) :
     """
     Main for the CLIP functional with 3 terms
     """
-  
-    exact_inc, exact_f = parameters.pure_czm()
+    print("------------------------------------------------")
+    print("Start :", parameters.functional_choice,"Dm = ", parameters.Dm)
+    print("------------------------------------------------")
+
     N_elements = parameters.N_elements
 
     u = np.zeros(2 * N_elements)
@@ -118,22 +129,22 @@ def main_clip_3_terms(parameters, incs) :
     functions = Functions_3_terms(parameters)
     solver = Solver(functions, parameters)
     
+    num_incs = len(incs)
     strain_str = []
     stress_str = []
     jump_str = []
-    jump_center_str = []
 
     displacement_str = []
     coh_damage_str = []
     bulk_damage_str = []
     lambda_str = []
 
-    cde_str = []
-    cda_str = []
-    bde_str = []
-    bda_str = []
-    tda_str = []
-    tde_str = []
+    cde_str = np.zeros(num_incs)
+    cda_str = np.zeros(num_incs)
+    bde_str = np.zeros(num_incs)
+    bda_str = np.zeros(num_incs)
+    tda_str = np.zeros(num_incs)
+    tde_str = np.zeros(num_incs)
 
     for i, u_t in enumerate(incs):
 
@@ -146,7 +157,8 @@ def main_clip_3_terms(parameters, incs) :
         else :
             d_prev = d.copy()
 
-        print("--------------------------------", i)
+        print("--------------------------------")
+        print("Increment : ",i , "ut =",u_t)
 
         results = solver.solve_functional(d,d_prev,bc)
         d  = results.x
@@ -172,12 +184,11 @@ def main_clip_3_terms(parameters, incs) :
         bda = bda - solver.functional.get_strain_energy(solver.functional.get_strain(u_),D)
         cda = cda - (-t1+t2-t3)
        
-        cde_str.append(cde)
-        cda_str.append(cda)
-
-        bda_str.append(bda)
-        tda_str.append(cda + bda)
-        tde_str.append(cde)
+        cde_str[i] = cde
+        cda_str[i] = cda
+        bda_str[i] = bda
+        tda_str[i] = cda + bda
+        tde_str[i] = cde
         
     
     filename = generate_filename()
@@ -188,12 +199,20 @@ def main_clip_3_terms(parameters, incs) :
             lmb = lambda_str, strain = strain_str,
             coh_disp_act = cda_str, bulk_disp_act = bda_str, tot_disp_act = tda_str, 
             coh_disp_exp = cde_str, bulk_disp_exp = bde_str, tot_disp_exp = tde_str,
-            exact_stress = exact_f, exact_seperation = exact_inc)
+            )
+    
+    print("------------------------------------------------")
+    print("End :", parameters.functional_choice,"Dm = ", parameters.Dm)
+    print("------------------------------------------------")
 
 def main_czm(parameters, incs):
     """
-    Main for the CZM functional 
+    Main for the CZM model 
     """
+    print("------------------------------------------------")
+    print("Start :", parameters.functional_choice)
+    print("------------------------------------------------")
+
     N_elements = parameters.N_elements
     u = np.zeros(2 * N_elements)
     d_prev = np.zeros(N_elements - 1)
@@ -206,24 +225,19 @@ def main_czm(parameters, incs):
     solver = Solver(functions, parameters)
 
     displacement_str = []
-    coh_damage_str = []
-    bulk_damage_str = []
+    coh_damage_str = []    
     lambda_str = []
     stress_str = []
     strain_str =[]
     jump_str =[]
-    cde_str = []
-    cda_str = []
-    bde_str = []
-    bda_str = []
-    tda_str = []
-    tde_str = []
+
 
     for i, u_t in enumerate(incs):
         bc[(2*N_elements-1)] = u_t 
         d_prev = d.copy()
 
-        print(" ------------------ ", i)
+        print("--------------------------------")
+        print("Increment : ",i , "ut =",u_t)
 
         res = solver.solve_functional(d,d_prev ,bc)
         d = res.x
@@ -242,47 +256,42 @@ def main_czm(parameters, incs):
     parameters_dict = parameters.to_dict()
 
     np.savez(filename,inputs= parameters_dict, imposed_disp = incs, stress = stress_str, seperation = jump_str,
-            displacement = displacement_str,cohesive_damage = coh_damage_str, bulk_damage = bulk_damage_str,
-            lmb = lambda_str, strain = strain_str,
-            coh_disp_act = cda_str, bulk_disp_act = bda_str, tot_disp_act = tda_str, 
-            coh_disp_exp = cde_str, bulk_disp_exp = bde_str, tot_disp_exp = tde_str,
+            displacement = displacement_str,cohesive_damage = coh_damage_str,
+            lmb = lambda_str, strain = strain_str          
             )
+
+    print("------------------------------------------------")
+    print("End :", parameters.functional_choice)
+    print("------------------------------------------------")
 
 def main_lip(parameters, incs):
     """
-    Main for the LIP functional 
+    Main for the LIP model 
     """
+    print("------------------------------------------------")
+    print("Start :", parameters.functional_choice)
+    print("------------------------------------------------")
 
     N_elements = parameters.N_elements
     N_v = parameters.N_v
     max_iter = parameters.max_iter
-
     u0 = np.zeros(N_v)
     D0 = np.zeros(N_elements)
     u = u0.copy()
     D = D0.copy()
     iteration = 0
     stop = False
-    tol = 1e-5
+    tol = 1e-6
 
     bc = {0 : 0, (N_v-1) : 0}
 
     functions = Functions_Lip(parameters)
     solver = Solver(functions, parameters)
 
-    displacement_str = []
-    coh_damage_str = []
+    displacement_str = []    
     bulk_damage_str = []
-    lambda_str = []
     stress_str = []
-    strain_str =[]
-    jump_str =[]
-    cde_str = []
-    cda_str = []
-    bde_str = []
-    bda_str = []
-    tda_str = []
-    tde_str = []
+    strain_str =[]   
 
     for i, u_t in enumerate(incs):
 
@@ -291,6 +300,9 @@ def main_lip(parameters, incs):
         iteration = 0
         low_bound = D.copy()
         stop = False
+
+        print("--------------------------------")
+        print("Increment :",i , "ut =",u_t)
 
         while (iteration < max_iter) and not stop:
             u0 = u.copy()
@@ -301,8 +313,6 @@ def main_lip(parameters, incs):
             else :
                 D0 = D.copy()
             
-            print(" ------------------ ", i)
-
             u_fun,F_fun  = solver.equilibrium_solver_lip.solve_equilibrium_ul(D0 , bc)      
                   
             res = solver.lip_functional(D0,u_fun, low_bound)  
@@ -311,31 +321,55 @@ def main_lip(parameters, incs):
             iteration += 1
             normdeltad = parameters.dx*np.linalg.norm(D-D0)
             normdeltau = parameters.dx*np.linalg.norm(u-u0)
-            #norm_delta_fun = np.linalg.norm(solver.functional.assemble_lip_functional(d, u_fun) - solver.functional.assemble_lip_functional(d0 , u0 ))/np.linalg.norm(solver.functional.assemble_lip_functional(d0,u0))
-            print("it = ",iteration,"nrm_fun = ",normdeltad,normdeltau )
-            if ( normdeltad< 1.e-6) & (normdeltau <=1.e-6) : stop = True
-            # if norm_delta_fun <= tol :
-            #   stop = True
-            # print("it = ",iteration,"nrm_fun = ",norm_delta_fun )
-
+            
+            print("Iteration :",iteration)
+            print("Norm_delta_d = ", normdeltad,"Norm_delta_u = ",normdeltau)
+            if ( normdeltad < tol) & (normdeltau <= tol) : stop = True
+            
         displacement_str.append(u_fun)
         stress_str.append(F_fun[-1])
         bulk_damage_str.append(D)
+        strain_str.append(solver.functional.get_strain_lip(u_fun))
             
 
     filename = generate_filename()
     parameters_dict = parameters.to_dict()
 
-    np.savez(filename,inputs= parameters_dict, imposed_disp = incs, stress = stress_str, seperation = jump_str,
-            displacement = displacement_str,cohesive_damage = coh_damage_str, bulk_damage = bulk_damage_str,
-            lmb = lambda_str, strain = strain_str,
-            coh_disp_act = cda_str, bulk_disp_act = bda_str, tot_disp_act = tda_str, 
-            coh_disp_exp = cde_str, bulk_disp_exp = bde_str, tot_disp_exp = tde_str,
+    np.savez(filename,inputs= parameters_dict, imposed_disp = incs, stress = stress_str,
+            displacement = displacement_str, bulk_damage = bulk_damage_str,
+             strain = strain_str            
             )
+    
+    print("------------------------------------------------")
+    print("End :", parameters.functional_choice)
+    print("------------------------------------------------")
 
+def main_exact_pure_czm(parameters):
+
+    print("------------------------------------------------")
+    print("Start :", parameters.functional_choice)
+    print("------------------------------------------------")
+
+
+    exact_f = [0, parameters.sigc, 0]
+    exact_in = [0, (parameters.sigc * parameters.L)/parameters.E, parameters.wc]
+
+    filename = generate_filename()
+    parameters_dict = parameters.to_dict()
+
+    np.savez(filename,inputs= parameters_dict, imposed_disp = exact_in, stress = exact_f,        
+            )
+    
+    print("------------------------------------------------")
+    print("End :", parameters.functional_choice)
+    print("------------------------------------------------")
 
 if __name__ == '__main__':
     
+    ################################################################
+    """
+    Creates folder to store the results
+    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
     folder_name = generate_filename()
@@ -345,6 +379,28 @@ if __name__ == '__main__':
     os.chdir(results_folder)
 
     ################################################################
+    """
+    For functional_choice = 'CLIP-4terms' : (To run the CLIP model)
+        damage function choices :
+            - damage_function = cos_sin (require parameter : alpha and beta)
+            - damage_function = D_squared (require parameter : alpha and beta)
+            - damage_function = D_std (require parameter : alpha and beta)
+
+    For functional_choice = 'CLIP-3terms' : (To run the CLIP model with Single dissipation term)
+        damage function choices :
+            - damage_function = cos_sin_D_squared (require parameter : alpha)
+
+    For functional_choice = 'CZM': (To run the CZM model)
+        damage function choices :
+            - damage_function = CZM
+
+    For functional_choice = 'LIP' : (To run the LIP model)
+        damage function choices :
+            - damage_function = LIP (require parameter : alpha)
+
+    For functional_choice = 'Exact' :(To obatin the exact solution of Pure CZM problem)
+        
+    """
 
     E = 3e10
     Gc = 120
@@ -358,23 +414,31 @@ if __name__ == '__main__':
     N_increments = 30
     max_iter = 100
     damage_function = 'cos_sin_D_squared'
-   
     
-    parameters_clip = initialize_parameters(Dm, alpha, beta)
+    parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
     incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.5, N_increments-1)))    
     main_run = main_clip_3_terms(parameters_clip, incs_clip)
   
+    ################################################################
     damage_function = 'CZM'
     functional_choice = 'CZM'
-    parameters_czm = initialize_parameters()
+    parameters_czm = initialize_parameters(damage_function = damage_function)
     incs_czm =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.5, N_increments-1))) 
     main_run = main_czm(parameters_czm, incs_czm)
 
+    ###############################################################
     damage_function = 'LIP'
     functional_choice = 'LIP'
-    parameters_lip = initialize_parameters(alpha=alpha)
-    incs_lip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.5, N_increments-1))) 
+    parameters_lip = initialize_parameters(damage_function = damage_function, alpha = alpha)
+    incs_lip =  np.concatenate((np.array([0]), np.linspace(parameters_lip.epsilon_0*L, parameters_lip.wc*1.5, N_increments-1))) 
     main_run = main_lip(parameters_lip, incs_lip)
+
+    ############################################################
+    functional_choice = 'Exact'
+    parameters_exact = initialize_parameters()
+    main_run = main_exact_pure_czm(parameters_exact)
+
+    ############################################################
 
     
 

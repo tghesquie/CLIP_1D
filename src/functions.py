@@ -280,7 +280,6 @@ class GD_bulk_czm():
     def get_First_derivative(self,D):
        return np.zeros_like(D)
 
-
 class Functions_CZM:
 
     def __init__(self,parameters):
