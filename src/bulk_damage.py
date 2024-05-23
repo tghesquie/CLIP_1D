@@ -13,7 +13,7 @@ class BulkDamage:
         D_values[D_values < 0] = 0  
         return D_values
 
-    def get_Bulk_damage(self, d, centeronly=True): 
+    def get_Bulk_damage(self, d, centeronly=True):
         D_values = self.get_Bulk_damage0(d)
         D_center = (D_values[:-1] + D_values[1:]) / 2
         if centeronly:

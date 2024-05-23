@@ -1,9 +1,10 @@
 """ Post Processing"""
-
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
-import os
+from functions import gd_cohesive_std
+import importlib
 
 def list_npz_files(directory, prefix="results"):
     """List all .npz files in the specified directory and its subdirectories that start with the given prefix."""
@@ -21,7 +22,6 @@ def load_and_process_files(npz_files):
     """
     Load data from .npz files and process it based on the 'functional_choice' parameter.
     """
-
     data_collection = []
     for file in npz_files:
         with np.load(file, allow_pickle=True) as data:
@@ -303,21 +303,66 @@ def plot_all(processed_data):
     plt.tight_layout()
     plt.show()
 
-################################################################
-"""
-Extract the files from the folder with prefix = 'results'
-"""
-script_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(script_dir)
-npz_files = list_npz_files(script_dir)
-processed_data = load_and_process_files(npz_files)
+def plot_functions_vs_damage(d_values):
+    functions_gd_std = gd_cohesive_std()
+    functions_gd_std_values = functions_gd_std.get_value(d_values)
+   
+    plt.figure(figsize=(10, 6))
+    plt.plot(d_values, functions_gd_std_values, label='gd_cohesive_std')
+    
+    plt.xlabel('d')
+    plt.ylabel('g(d)')
+    plt.title('Plot of $g(d)$ against $d$ for gd_cohesive_std')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
-##############################################################
+def plot_func_values_vs_damage(class_names, d_values, additional_params, module_name='functions'):
+    plt.figure(figsize=(10, 6))
+    
+    for class_name in class_names:
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+        instance = cls()
+        g_values = instance.get_value(d_values)
+        # work in progress to handle the extra parameters in functions 
+        # if class_name in additional_params:
+        #     parameters = additional_params[class_name]['parameters']
+        #     instance = cls(parameters)
+        #     g_values = instance.get_value(d_values)
+        # else :
+        #     instance = cls()
+        #     g_values = instance.get_value(d_values)
+        plt.plot(d_values, g_values, label=f'{class_name}')
+        plt.xlabel('d')
+        plt.ylabel(f'{class_name}')
+        plt.title(f'Plot of {class_name} vs damage')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
-plot_all_stress_vs_displacement(processed_data)
-plot_all_dissipation(processed_data)
-plot_all_coh_stress_vs_seperation(processed_data)
-plot_all_damge_vs_imposed_disp(processed_data)
-plot_all(processed_data)
+if __name__ == "__main__":
+    ################################################################
+    #Extract the files from the folder with prefix = 'results'
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+    npz_files = list_npz_files(script_dir)
+    processed_data = load_and_process_files(npz_files)
+
+    ##############################################################
+
+    plot_all_stress_vs_displacement(processed_data)
+    plot_all_dissipation(processed_data)
+    plot_all_coh_stress_vs_seperation(processed_data)
+    plot_all_damge_vs_imposed_disp(processed_data)
+    plot_all(processed_data)
+
+    ##############################################################
+    # part to execute functions vs plot for different fucntions
+    # d_values = np.linspace(0.0, 1.0, 100)
+    # class_names = ['gd_cohesive_std']
+    # plot_func_values_vs_damage(class_names, d_values, additional_params = None)
+
+
 
 

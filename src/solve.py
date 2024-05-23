@@ -32,7 +32,7 @@ class EquilibriumSolver:
         """
         # Calculate element stiffness contributions based on damage and material properties
         
-        element_stiffness_contributions = (self.model.GD_bulk.get_Value(D_center)[:, np.newaxis] * (self.params.E / self.params.dx * np.array([1., -1., -1., 1.]))).flatten()
+        element_stiffness_contributions = (self.model.GD_bulk.get_value(D_center)[:, np.newaxis] * (self.params.E / self.params.dx * np.array([1., -1., -1., 1.]))).flatten()
         
         # Check if the bulk stiffness matrix already exists
         if self.K_uu_b is None:
@@ -250,7 +250,7 @@ class EquilibriumSolver_Lip:
         return -1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v) +1./self.params.dx*scipy.sparse.eye(self.params.N_v-1,self.params.N_v,1)
     
     def d2e_eps_deps2(self, d) : 
-        return self.params.dx*scipy.sparse.diags(self.params.E*self.model.GD_bulk.get_Value(d))
+        return self.params.dx*scipy.sparse.diags(self.params.E*self.model.GD_bulk.get_value(d))
 
     def K_uu(self,d):
         B = self.get_B()
@@ -258,7 +258,7 @@ class EquilibriumSolver_Lip:
     
     def solve_equilibrium_ul(self, d, imposed_displacements):
         Kuu = self.K_uu(d)
-        n,n = Kuu.shape
+        n  = Kuu.shape[0]
         Fu = scipy.sparse.coo_matrix((n,1), dtype = float)
 
         nc = len(imposed_displacements)
@@ -310,49 +310,49 @@ class Functional:
         """
         Calculates the strain energy for the given strain and damage state.
         """
-        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_Value(D_center).dot(strain**2))
+        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_value(D_center).dot(strain**2))
     
     def get_strain_energy_derivative(self, strain, D_center):
         """
         Calculates the derivative of strain energy with respect to strain.
         """
-        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_First_derivative(D_center) * (strain**2))
+        return 0.5 * self.params.dx * self.params.E * (self.model.GD_bulk.get_first_derivative(D_center) * (strain**2))
     
     def get_cohesive_energy(self, u_jump, d):
         """
         Calculates the cohesive energy for the given jump in displacement and damage state.
         """
-        return 0.5 * self.params.k * (self.model.gd_cohesive.get_Value(d).dot(u_jump**2))
+        return 0.5 * self.params.k * (self.model.gd_cohesive.get_value(d).dot(u_jump**2))
         
     def get_cohesive_energy_derivative(self, u_jump, d):
         """
         Calculates the derivative of cohesive energy with respect to jump in displacement.
         """
-        return 0.5 * self.params.k * (self.model.gd_cohesive.get_First_derivative(d) * (u_jump**2))
+        return 0.5 * self.params.k * (self.model.gd_cohesive.get_first_derivative(d) * (u_jump**2))
     
     def get_cohesive_dissipation(self, d):
         """
         Calculates the cohesive energy dissipation for the given damage state.
         """
-        return np.sum(self.params.yc * self.model.hd_cohesive.get_Value(d))
+        return np.sum(self.params.yc * self.model.hd_cohesive.get_value(d))
     
     def get_cohesive_dissipation_derivative(self, d):
         """
         Calculates the derivative of cohesive energy dissipation with respect to damage.
         """
-        return self.params.yc * self.model.hd_cohesive.get_First_derivative(d)
+        return self.params.yc * self.model.hd_cohesive.get_first_derivative(d)
     
     def get_bulk_dissipation(self, D_center):
         """
         Calculates the bulk energy dissipation for the given damage state.
         """
-        return np.sum(self.params.Yc * self.params.dx * self.model.HD_bulk.get_Value(D_center))
+        return np.sum(self.params.Yc * self.params.dx * self.model.HD_bulk.get_value(D_center))
     
     def get_bulk_dissipation_derivative(self, D_center):
         """
         Calculates the derivative of bulk energy dissipation with respect to damage.
         """
-        return self.params.Yc * self.params.dx * self.model.HD_bulk.get_First_derivative(D_center)
+        return self.params.Yc * self.params.dx * self.model.HD_bulk.get_first_derivative(D_center)
     
     def get_cohesive_energy_lagrange(self, u_jump, lambda_, d):
         """
@@ -508,11 +508,11 @@ class Functional:
         sigm = (step_stress[1:] + step_stress[:-1])/2.
                     
         for ie in range(step_elem_strain.shape[1]):
-                deps = step_elem_strain[1:,ie] - step_elem_strain[:-1,ie]
-                bulkdispe = self.params.dx*np.sum(deps*sigm)                                                        
-                totalbulkdisp += bulkdispe
-                total_bulk_str.append(bulkdispe)
-        
+            deps = step_elem_strain[1:,ie] - step_elem_strain[:-1,ie]
+            bulkdispe = self.params.dx*np.sum(deps*sigm)                                                        
+            totalbulkdisp += bulkdispe
+            total_bulk_str.append(bulkdispe)
+
         step_w = np.array(jump_fun_str)
         totalcohesivedisp = 0
         total_cohesive_str = []
