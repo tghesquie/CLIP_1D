@@ -55,3 +55,43 @@ class Simulation_Parameters:
             'N_increments': self.N_increments,
             'max_iter': self.max_iter
         }
+
+class Explicit_Parameter:
+    def __init__(self, E, Gc, sigc, rho, L, Area, eps0dot, max_steps, N_elements):
+
+        self.E = E  # Young's Modulus (Pa)
+        self.Gc = Gc  # Fracture Energy (N/m)
+        self.sigc = sigc  # Stress Limit (N/m^2)
+        self.rho = rho
+        self.L = L  # Length of the bar (m)
+        self.Area = Area
+        self.eps0dot = eps0dot #strain rate (s^-1)
+        self.max_steps = max_steps
+        self.N_elements = N_elements
+        self.calculate_derived_parameters()
+        
+
+    def calculate_derived_parameters(self):
+        """
+        Computes the parameters : wc, lc, lch, gamma, k, Yc, yc, N_v, N_elements, x, dx, epsilon_0
+        """
+        self.wc = (2 * self.Gc) / self.sigc  # Critical Separation
+        self.k = self.sigc**2 / self.Gc
+        self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
+        self.N_nodes = self.N_elements + 1  # Number of nodes
+        self.dx = self.L / self.N_elements  # Element size
+        
+
+    def to_dict(self):
+        return {
+            'E': self.E,
+            'Gc': self.Gc,
+            'sigc': self.sigc,
+            'L': self.L,
+            'Area': self.Area,
+            'eps0dot': self.eps0dot,
+            'max_steps': self.max_steps,
+            'N_elements' : self.N_elements
+            
+        }
+       

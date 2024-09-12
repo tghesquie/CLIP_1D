@@ -44,6 +44,7 @@ def main_clip(parameters, incs, terms):
     displacement_str = []
     coh_damage_str = []
     bulk_damage_str = []
+    bulk_damage_overall_str = []
     lambda_str = []
     cde_str = np.zeros(num_incs)
     cda_str = np.zeros(num_incs)
@@ -66,7 +67,7 @@ def main_clip(parameters, incs, terms):
         results = solver.solve_functional(d, d_prev, bc)
         d = results.x
 
-        D = solver.bulk_damage.get_Bulk_damage(d) 
+        _,D,D_overall = solver.bulk_damage.get_Bulk_damage(d,centeronly = False) 
         u_, F_, lambda_, _ = solver.equilibrium_solver.solve_equilibrium_ul(d, D, bc)
         cde = solver.functional.get_cohesive_dissipation(d)
         bde = solver.functional.get_bulk_dissipation(D) if terms == 4 else None
@@ -77,6 +78,7 @@ def main_clip(parameters, incs, terms):
         displacement_str.append(u_)
         coh_damage_str.append(d)
         bulk_damage_str.append(D)
+        bulk_damage_overall_str.append(D_overall)
         lambda_str.append(lambda_)
 
         t1, t2, t3 = solver.functional.get_cohesive_energy_lagrange(solver.functional.get_jump(u_), lambda_, d)
@@ -89,7 +91,7 @@ def main_clip(parameters, incs, terms):
         bda_str[i] = bda
         bde_str[i] = bde
         tda_str[i] = cda + bda
-        tde_str[i] = cde
+        tde_str[i] = cde + bde 
 
     results_dict = {
         'inputs': parameters.to_dict(),
@@ -99,6 +101,7 @@ def main_clip(parameters, incs, terms):
         'displacement': displacement_str,
         'cohesive_damage': coh_damage_str,
         'bulk_damage': bulk_damage_str,
+        'bulk_damage_overall': bulk_damage_overall_str,
         'lmb': lambda_str,
         'strain': strain_str,
         'coh_disp_act': cda_str,
@@ -344,20 +347,20 @@ if __name__ == '__main__':
     Gc = 120
     sigc = 3e6
     L = 0.2
-    Dm = 0.9
+    Dm = 0.7
     alpha = np.pi/4
     beta = 0
     he = 10
-    functional_choice = 'CLIP-3terms'
+    functional_choice = 'CLIP-4terms'
     N_increments = 30
     max_iter = 100
-    damage_function = 'cos_sin_D_squared'
+    damage_function = 'hybrid'
     
     parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
-    incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.5, N_increments-1)))    
-    result_1 = main_clip_3_terms(parameters_clip, incs_clip)
+    incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.1, N_increments-1)))    
+    result_1 = main_clip_4_terms(parameters_clip, incs_clip)
   
-    ################################################################
+    ###############################################################
     damage_function = 'CZM'
     functional_choice = 'CZM'
     parameters_czm = initialize_parameters(damage_function = damage_function)

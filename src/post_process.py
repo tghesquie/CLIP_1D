@@ -1,17 +1,18 @@
 """ Post Processing"""
 import os
+import importlib
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.ticker import FuncFormatter
 from functions import gd_cohesive_std
-import importlib
 
 def list_npz_files(directory, prefix="results"):
     """List all .npz files in the specified directory and its subdirectories that start with the given prefix."""
     npz_files = []
     for root, dirs, files in os.walk(directory):
         for dir in dirs:
-            if dir.startswith(prefix):
+            if dir.startswith(prefix):                
                 folder_path = os.path.join(root, dir)
                 for file in os.listdir(folder_path):
                     if file.endswith('.npz'):
@@ -35,6 +36,8 @@ def load_and_process_files(npz_files):
             if functional_choice in ['CLIP-3terms', 'CLIP-4terms']:
                 seperation = data['seperation']
                 cohesive_damage =data['cohesive_damage']
+                bulk_damage = data['bulk_damage']
+                bulk_damage_overall = data['bulk_damage_overall']
                 coh_disp_act = data['coh_disp_act']
                 bulk_disp_act = data['bulk_disp_act']
                 tot_disp_act = data['tot_disp_act']
@@ -57,6 +60,8 @@ def load_and_process_files(npz_files):
                     'imposed_disp': imposed_disp,
                     'seperation':seperation,
                     'cohesive_damage':cohesive_damage,
+                    'bulk_damage' : bulk_damage,
+                    'bulk_damage_overall' :bulk_damage_overall,
                     'coh_disp_act':coh_disp_act,
                     'bulk_disp_act': bulk_disp_act,
                     'tot_disp_act':tot_disp_act,
@@ -95,7 +100,7 @@ def format_x_ticks(value, pos):
             return f"{value:.1e}"
 
 def plot_all_stress_vs_displacement(processed_data):
-    plt.figure(figsize=(10, 6)) 
+    plt.figure(figsize=(10, 6))
 
     for entry in processed_data:       
         Dm = entry['parameters'].get('Dm', 'unknown')
@@ -103,11 +108,26 @@ def plot_all_stress_vs_displacement(processed_data):
         sigc = entry['parameters'].get('sigc', 'unknown')
         Gc = entry['parameters'].get('Gc', 'unknown')
         functional_choice = entry['parameters'].get('functional_choice','unknown')        
-        label = functional_choice if functional_choice in ['CZM', 'LIP', 'Exact'] else f"{functional_choice}, $D_m$={Dm}, $\\alpha$={alpha:.3f}"
+        #label = functional_choice if functional_choice in ['CZM', 'LIP', 'Exact'] else f"{functional_choice}, $D_m$={Dm}, $\\alpha$={alpha:.3f}"
+        if functional_choice == 'CZM':
+            label = f"{functional_choice} "
+            color = "C1"
+        
+        elif functional_choice == 'LIP':
+            label = f"{functional_choice}"
+            color = "C2"
+        
+        elif functional_choice == 'Exact':
+            label = f"{functional_choice}"
+            color = "black"
+        
+        else :
+            label = f"CLIP , $D_m$ = {Dm}"
+            color = "C0"
 
-        plt.plot(entry['imposed_disp'], entry['stress'], label=label)
+        plt.plot(entry['imposed_disp'], entry['stress'], label=label, color = color)
 
-    plt.title("Stress [$\sigma$] vs Imposed Displacement [$u_t$]", fontsize = 'large')
+    plt.title("Stress [$\sigma$] vs Imposed Displacement [$u_t$]", fontsize = 'large', fontweight = 'bold')
     plt.xlabel("Imposed Displacement [m]", fontsize = 'large')
     plt.ylabel("Stress [Pa] ", fontsize = 'large')
     plt.axhline(y=sigc, color='red', linestyle='--')
@@ -115,7 +135,7 @@ def plot_all_stress_vs_displacement(processed_data):
     plt.gca().xaxis.set_major_formatter(FuncFormatter(format_x_ticks))
     plt.legend(fontsize = 'large') 
     plt.grid(True) 
-    #plt.savefig('stress_vs_imposed_displacement.png')
+    plt.savefig('/home/ssshetty/Home/Main/Presentation/Graphs/hybrid_model/stress_vs_imposed_displacement_report.png',dpi = 300)
     plt.show()
 
 def plot_all_dissipation(processed_data):     
@@ -128,12 +148,11 @@ def plot_all_dissipation(processed_data):
           continue
 
         label = f"{functional_choice}, $D_m$ = {Dm}, $\\alpha$ = {alpha:.3f}"
-
         axs[0,0].plot(entry['imposed_disp'], entry['coh_disp_act'] )
         axs[0,1].plot(entry['imposed_disp'], entry['bulk_disp_act'] )
         axs[0,2].plot(entry['imposed_disp'], entry['tot_disp_act'],label = label )
         axs[1,0].plot(entry['imposed_disp'], entry['coh_disp_exp'] )
-        if functional_choice == 'CLIP_4terms':        
+        if functional_choice == 'CLIP-4terms':        
             axs[1,1].plot(entry['imposed_disp'], entry['bulk_disp_exp'] )
         axs[1,2].plot(entry['imposed_disp'], entry['tot_disp_exp'],label = label )
 
@@ -188,6 +207,32 @@ def plot_all_coh_stress_vs_seperation(processed_data):
     plt.grid(True)
     plt.show()
 
+def plot_damage_combine(processed_data):
+    plt.figure(figsize=(10, 6))
+    for entry in processed_data :        
+        Dm = entry['parameters'].get('Dm', 'unknown')
+        alpha = entry['parameters'].get('alpha', 'unknown')        
+        functional_choice = entry['parameters'].get('functional_choice','unknown')  
+        if functional_choice in ['CZM', 'LIP', 'Exact']:
+            continue
+        ij = [int(len(entry['imposed_disp'])/7.5) ,int(len(entry['imposed_disp'])/5) ,int(len(entry['imposed_disp'])/2.5) , -1]    
+        bulk = [ '0.25', '0.5','0.75', '' ]
+        for i,b in zip(ij, bulk):
+            if i < len(entry['cohesive_damage']) :
+                d_data = entry['cohesive_damage'][i]
+                bulk_data = entry['bulk_damage_overall'][i]
+                plt.scatter( entry['parameters'].get('L', 'unknown')/2, max(d_data) )
+                plt.plot(np.linspace(0,  entry['parameters'].get('L', 'unknown'), len(bulk_data)), bulk_data, label = f'$u_t = {b} \omega_c$')
+                
+        plt.axhline(y=Dm, color='red', linestyle='--')
+        plt.text( entry['parameters'].get('L', 'unknown')*0.05, Dm, '$D_m$', color='red', fontsize=10, va='bottom', ha='right')
+        plt.xlabel('Position along the bar [m]',fontsize = 'large')
+        plt.ylabel('Cohesive and Bulk Damage', fontsize = 'large')
+        plt.legend(fontsize = 'large')
+        plt.title('Damage along the bar',fontsize = 'large')
+        plt.grid(True)
+        plt.show()
+
 def plot_all_damge_vs_imposed_disp(processed_data):
     plt.figure(figsize=(10, 6)) 
 
@@ -240,7 +285,7 @@ def plot_all(processed_data):
         axs2[0,1].plot(entry['imposed_disp'], entry['bulk_disp_act'] )
         axs2[0,2].plot(entry['imposed_disp'], entry['tot_disp_act'],label = label )
         axs2[1,0].plot(entry['imposed_disp'], entry['coh_disp_exp'] )
-        if functional_choice == 'CLIP_4terms':        
+        if functional_choice == 'CLIP-4terms':        
             axs2[1,1].plot(entry['imposed_disp'], entry['bulk_disp_exp'] )
         axs2[1,2].plot(entry['imposed_disp'], entry['tot_disp_exp'],label = label )
 
@@ -341,6 +386,45 @@ def plot_func_values_vs_damage(class_names, d_values, additional_params, module_
         plt.grid(True)
         plt.show()
 
+def damage_comp_plot(dt, max_steps, d_aka, d_test):
+
+    time = [i * dt for i in range(max_steps)]
+
+    plt.plot(time, d_aka, label='Akantu')
+    plt.plot(time, d_test, label='Test')
+
+    plt.xlabel('Time (s)', fontsize = 'large')
+    plt.ylabel('Damage', fontsize = 'large')
+    plt.title('Damage comparison over time', fontweight = 'bold', fontsize = 'large')
+    plt.legend()
+    plt.grid(True)
+
+    formatter = ticker.FormatStrFormatter('%.1e')  
+    plt.gca().xaxis.set_major_formatter(formatter)
+    plt.savefig('/home/ssshetty/Home/Main/Akantu/akantu/examples/c++/solid_mechanics_cohesive_model/test/len_bar/Algorithm_test/damage_comp.png', dpi=300)
+    plt.show()
+
+def energy_comp_plot(dt, max_steps, E_pot, Ep_str, E_kin, Ekin_str, E_dis, Edis_str):
+
+    time = [i * dt for i in range(max_steps)]
+
+    plt.plot(time, E_pot, label = 'Epot_Aka')
+    plt.plot(time, Ep_str, label='Epot_test')
+    plt.plot(time, E_kin, label = 'Ekin_Aka')
+    plt.plot(time, Ekin_str, label = 'Ekin_test')
+    plt.plot(time, E_dis, label = 'Edis_Aka')
+    plt.plot(time, Edis_str, label = 'Edis_test')
+    #linestyle='-', marker='o'
+    plt.legend()
+    plt.grid(True)
+    plt.xlabel('Time (s)', fontsize = 'large')
+    plt.ylabel('Energy (Nm)', fontsize = 'large')
+    plt.title('Energy comparison over time', fontweight = 'bold', fontsize = 'large')
+    formatter = ticker.FormatStrFormatter('%.1e')
+    plt.gca().xaxis.set_major_formatter(formatter)
+    plt.savefig('/home/ssshetty/Home/Main/Akantu/akantu/examples/c++/solid_mechanics_cohesive_model/test/len_bar/Algorithm_test/energy_comp.png', dpi=300)
+    plt.show()
+
 if __name__ == "__main__":
     ################################################################
     #Extract the files from the folder with prefix = 'results'
@@ -352,17 +436,21 @@ if __name__ == "__main__":
     ##############################################################
 
     plot_all_stress_vs_displacement(processed_data)
-    plot_all_dissipation(processed_data)
-    plot_all_coh_stress_vs_seperation(processed_data)
-    plot_all_damge_vs_imposed_disp(processed_data)
-    plot_all(processed_data)
+    # plot_all_dissipation(processed_data)
+    plot_damage_combine(processed_data)
+    # plot_all_coh_stress_vs_seperation(processed_data)
+    # plot_all_damge_vs_imposed_disp(processed_data)
+    # plot_all(processed_data)
+    # Dark2_r, Accent,Blues,Paired,Purples,Spectral
+    # copper,cubehelix,tab20
 
     ##############################################################
-    # part to execute functions vs plot for different fucntions
+    # # part to execute functions vs plot for different fucntions
     # d_values = np.linspace(0.0, 1.0, 100)
-    # class_names = ['gd_cohesive_std']
-    # plot_func_values_vs_damage(class_names, d_values, additional_params = None)
-
-
-
-
+    # module_name='functions'
+    # module = importlib.import_module(module_name)
+    # cls = getattr(module, 'hd_cohesive_quad_4_terms')
+    # parameters = {'beta' : 0.5}
+    # instance = cls(parameters)
+    # # class_names = ['gd_cohesive_std']
+    # # plot_func_values_vs_damage(class_names, d_values, additional_params = None)
