@@ -1,8 +1,10 @@
 import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg
+from scipy.interpolate import interp1d
 import math
-
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from bulk_damage import BulkDamage
 
 class EquilibriumSolver:
@@ -367,12 +369,56 @@ class Functional:
     def get_cohesive_energy_lagrange_derivative(self, lambda_,d):
         return 1/(2 * self.params.k) * (lambda_**2) * (self.model.gd_cohesive.get_derivative_lmb_value(d))
 
-    def assemble_clip_functional_4_terms(self, d, D_center, u, lambda_, returnall = False):
+    def assemble_clip_functional_4_terms(self, d, D_center, u, lambda_,returnall = False):
         """
         Assemble the functional to minimize
         """
         strain = self.get_strain(u)
         u_jump = self.get_jump(u)
+
+        strain_energy = self.get_strain_energy(strain, D_center)
+        ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(u_jump, lambda_, d)
+        cohesive_dissipation = self.get_cohesive_dissipation(d)
+        bulk_dissipation = self.get_bulk_dissipation(D_center)
+
+        clip_functional = strain_energy - ce_term1 + ce_term2 - ce_term3 + bulk_dissipation + cohesive_dissipation 
+        if returnall:
+            return clip_functional, strain_energy, ce_term1, ce_term2, ce_term3, bulk_dissipation, cohesive_dissipation
+        else:
+            return clip_functional
+
+    def get_strain_explicit_clip(self, disp):
+        dx =self.params.dx
+        N_nodes_half = math.ceil(self.params.N_nodes / 2)
+        if self.params.new_crack == 0:
+            strain = (disp[1:] - disp[:-1])/dx
+            return strain
+
+        else :
+            disp_left = disp[: N_nodes_half]
+            disp_right = disp[N_nodes_half: ]
+
+            strain_left = (disp_left[1:] - disp_left[:-1])/dx
+            strain_right = (disp_right[1:] - disp_right[:-1])/dx
+            strain = np.concatenate((strain_left, strain_right))
+            return strain
+
+    def get_jump_explcit_clip(self, disp):
+        jump = np.zeros(self.params.N_elements-1)
+        N_nodes_half = math.ceil(self.params.N_nodes / 2)
+        if self.params.new_crack == 0:
+            return jump 
+
+        else:
+            jump[math.floor(self.params.N_elements / 2)-1] =  abs(disp[N_nodes_half-1] - disp[N_nodes_half])
+            return jump
+     
+    def assemble_clip_functional_4_terms_explicit_clip(self, d, D_center, u, lambda_,returnall = False):
+        """
+        Assemble the functional to minimize
+        """
+        strain = self.get_strain_explicit_clip(u)
+        u_jump = self.get_jump_explcit_clip(u)
 
         strain_energy = self.get_strain_energy(strain, D_center)
         ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(u_jump, lambda_, d)
@@ -510,7 +556,7 @@ class Functional:
                     
         for ie in range(step_elem_strain.shape[1]):
             deps = step_elem_strain[1:,ie] - step_elem_strain[:-1,ie]
-            bulkdispe = self.params.dx*np.sum(deps*sigm)                                                        
+            bulkdispe = self.params.dx*np.sum(deps*sigm)       
             totalbulkdisp += bulkdispe
             total_bulk_str.append(bulkdispe)
 
@@ -526,6 +572,17 @@ class Functional:
     
         return totalcohesivedisp,totalbulkdisp
 
+    def get_potential_energy(self, u, D):
+        strain = self.get_strain(u)
+
+        pot = self.get_strain_energy(strain, D)
+
+        return pot
+
+    def get_cohesive_energy(self,d, jump, lambda_ ):
+        ce_term1, ce_term2, ce_term3 = self.get_cohesive_energy_lagrange(jump, lambda_, d)
+        Ecoh = -ce_term1 + ce_term2 - ce_term3
+        return Ecoh
 class Solver:
     """
     Coordinates the solution of the equilibrium equations and damage evolution.
@@ -547,7 +604,7 @@ class Solver:
             
         elif self.params.functional_choice == 'CLIP-4terms':
             D_center = self.bulk_damage.get_Bulk_damage(d)
-            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)        
+            u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc) 
             clip_functional = self.functional.assemble_clip_functional_4_terms(d, D_center, u_, lambda_)
         
         elif self.params.functional_choice == 'CZM':
@@ -559,8 +616,7 @@ class Solver:
            raise ValueError("Invalid functional choice")
 
         return clip_functional
-    
-
+  
     def jac_functional(self, d, bc): 
 
         if self.params.functional_choice == 'CLIP-3terms': 
@@ -583,12 +639,88 @@ class Solver:
 
         return jac_clip_functional
 
-    
+    def clip_czm_functional_plot(self, d, bc):
+
+            if self.params.functional_choice == 'CLIP-3terms':
+                D_center = self.bulk_damage.get_Bulk_damage(d)
+                u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc)        
+                clip_functional = self.functional.assemble_clip_functional_3_terms(d, D_center, u_, lambda_)
+                
+            elif self.params.functional_choice == 'CLIP-4terms':
+                D_center = self.bulk_damage.get_Bulk_damage(d)
+                u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_center, bc) 
+                functional_1, se, ce1, ce2, ce3, coh_dissip, bulk_dissip = self.functional.assemble_clip_functional_4_terms(d, D_center, u_, lambda_, returnall=True)
+            
+            elif self.params.functional_choice == 'CZM':
+                D_pseudo_czm = (np.concatenate([np.ones(1), np.ones_like(d)]))
+                u_, F, lambda_, K = self.equilibrium_solver.solve_equilibrium_ul(d, D_pseudo_czm, bc)      
+                clip_functional = self.functional.assemble_czm_functional(d, D_pseudo_czm, u_, lambda_)
+            
+            else:
+                raise ValueError("Invalid functional choice")
+
+            return functional_1, se, ce1, ce2, ce3, coh_dissip, bulk_dissip ,lambda_
+        
     def solve_functional(self, d, d_prev, bc):
         """
         Solves the functional for the given damage state and boundary conditions.
         """
+        d1 = np.zeros(self.params.N_elements-1)
+        dtest = np.linspace(0,1,1000)
+        func_str = []
+        se_str = []
+        ce1_str = []
+        ce2_str = []
+        ce3_str = []
+        coh_dissip_str = []
+        bulk_dissip_str = []
+        for i in range(1000):
+
+                d1[math.floor((self.params.N_elements-1)/2)] = dtest[i]
+                functional_1, se, ce1, ce2, ce3, coh_dissip, bulk_dissip,lda = self.clip_czm_functional_plot(d1, bc)
+                func_str.append(functional_1)
+                se_str.append(se)
+                ce1_str.append(ce1)
+                ce2_str.append(ce2)
+                ce3_str.append(ce3)
+                coh_dissip_str.append(coh_dissip)
+                bulk_dissip_str.append(bulk_dissip)
+                
+        print("min func = ", min(func_str))
+        #print("lda = ", lda, lda[math.floor((self.params.N_elements-1)/2)])
+        plt.plot(dtest, func_str, label = ' Functional')
+        # plt.plot(dtest, se_str, label = ' Strain Energy')
+        # plt.plot(dtest, ce1_str, label = ' Cohesive Energy - 1')
+        # plt.plot(dtest, ce2_str, label = ' Cohesive Energy - 2')
+        # plt.plot(dtest, ce3_str, label = ' Cohesive Energy - 3')
+        # plt.plot(dtest, coh_dissip_str, label = ' Cohesive Dissipation')
+        # plt.plot(dtest, bulk_dissip_str, label = ' Bulk Dissipation')
+        plt.xlabel('Cohesive Damage', fontsize = 'large')
+        plt.ylabel('Functional (N/m)', fontsize = 'large')
+        plt.title('Functional (F) vs Cohesive damage (d)', fontweight = 'bold', fontsize = 'large')
         
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        # fig = go.Figure()
+        # fig.add_trace(go.Scatter(x=dtest, y=func_str, mode='lines', name='Functional'))
+        # fig.add_trace(go.Scatter(x=dtest, y=se_str, mode='lines', name='Strain_Energy'))
+        # fig.add_trace(go.Scatter(x=dtest, y=ce1_str, mode='lines', name='Coh energy 1'))
+        # fig.add_trace(go.Scatter(x=dtest, y=ce2_str, mode='lines', name='Coh energy 2'))
+        # fig.add_trace(go.Scatter(x=dtest, y=ce3_str, mode='lines', name='Coh energy 3'))
+        # fig.add_trace(go.Scatter(x=dtest, y=coh_dissip_str, mode='lines', name='Cohesive_Dissipation'))
+        # fig.add_trace(go.Scatter(x=dtest, y=bulk_dissip_str, mode='lines', name='Bulk Dissipation'))
+        
+        # fig.update_layout(
+        # xaxis=dict(showgrid=True, gridcolor='black',linecolor = 'black'),
+        # yaxis=dict(showgrid=True, gridcolor='black', linecolor = 'black'),
+        # title=f"Functional terms vs Cohesive Damage (d)",  # Using f-string
+        # xaxis_title="Cohesive Damage",
+        # yaxis_title=" Functional term (N/m)",
+        # )
+        # fig.show()
+
         functional = lambda damage : self.clip_czm_functional(damage, bc)
         jacobian = lambda damage : self.jac_functional(damage, bc)
         bounds = scipy.optimize.Bounds(d_prev, np.ones(len(d_prev)))
@@ -603,8 +735,6 @@ class Solver:
         if not damage_opt.success:
            raise RuntimeError("Optimization failed")
         return damage_opt
-    
-
     
     def  lip_functional(self, D, u_, low_bound):
 
@@ -630,49 +760,174 @@ class Solver:
 class ExplicitSolver:
 
     def __init__(self,functions,parameters):
+        self.bulk_damage = BulkDamage(parameters.lc, parameters.Dm,parameters.get_len_mat(parameters.x))
         self.functions = functions
         self.params = parameters
-
-    def velocity_predict(self, dt, vel, acc):
-        return vel[1:-1] + (dt /2)* acc[1:-1]
+        self.Solver = Solver
+        self.functional = Functional(functions, parameters, self.bulk_damage)
+        self.w_max = 0
+        self.d_max = 0
     
-    def compute_displacement(self, dt, disp, vel_predict):        
-        disp[1: -1] = disp[1:-1] + (dt * vel_predict)
-        return disp
+    def get_nodes(self):
+        if self.params.new_crack == 0 :
+            nodes = np.linspace(0, self.params.L, self.params.N_nodes)
+            return nodes
+        
+        else : 
+            nodes = np.concatenate((np.linspace(0, self.params.L/2, int((self.params.N_nodes+1)//2)),np.linspace(self.params.L/2, self.params.L, int((self.params.N_nodes+1)//2))))
+            return nodes
 
-    def  compute_lagrange(self, disp, new_crack, lda, sigc, stress):
+    def initial_and_boundary_conditions(self, nodes):
+        if self.params.boundary_type == 'free':
+            vel = nodes * self.params.eps0dot
+            return vel
+    
+        elif self.params.boundary_type == 'imposed' or self.params.boundary_type == 'small_case':
+            vel = nodes * self.params.eps0dot
+            return vel
+        
+        elif self.params.boundary_type == 'string':
+            self.params.update_new_crack(2)
+            d = np.zeros(self.params.N_elements-1)
+            lda = np.zeros(self.params.N_elements-1)
+            disp = nodes * (self.params.sigc * self.params.L)/(self.params.E) 
+            mid_node = math.floor(self.params.N_nodes / 2)
+            disp = np.insert(disp, mid_node, disp[mid_node])
+            d[math.floor((self.params.N_elements-1)/2)] = 0.01
+            stress, strain, _ = self.get_stress(disp, d, lda)
+            force = self.get_nodal_forces(stress)
+            mass = self.get_M_lumped()
+            acc = self.compute_acceleration(force, mass)
+            vel_predict = np.zeros(self.params.N_nodes-1)
+            return disp, acc, vel_predict, d
+
+    def boundary_conditions_on_time(self, time, disp):
+        if self.params.boundary_type == 'free':
+            return disp 
+        
+        elif self.params.boundary_type == 'imposed':
+            disp[0] = 0
+            disp[-1]  = self.params.L * self.params.eps0dot * time
+            return disp 
+  
+    def velocity_predict(self, dt, vel, acc):
+        if self.params.boundary_type == 'free' or self.params.boundary_type == 'string':
+            return vel[1:] + (dt /2)* acc[1:]
+        elif self.params.boundary_type == 'imposed':
+            return vel[1:-1] + (dt /2)* acc[1:-1]
+        elif self.params.boundary_type == 'small_case':
+            return vel + (dt /2)* acc
+
+    def compute_displacement(self, dt, disp, vel, acc, vel_predict):
+        if self.params.boundary_type == 'free' or self.params.boundary_type == 'string': 
+            #disp[1:] = disp[1:] + (dt*vel[1:]) + ((dt**2)/2)*acc[1:]
+            disp[1:] = disp[1:] + (dt * vel_predict)
+            return disp
+        elif self.params.boundary_type == 'imposed':     
+            disp[1: -1] += (dt * vel_predict)
+            return disp
+        elif self.params.boundary_type == 'small_case':
+            disp += (dt * vel_predict)
+            return disp
+        
+    def  compute_lagrange(self, disp, lda, stress):
         mid_index = math.floor(len(lda)/2)
         N_nodes_half = math.ceil(self.params.N_nodes / 2)
         
-        if new_crack == 0:
-            return lda, new_crack
+        if self.params.new_crack == 0:
+            return lda
         
-        if new_crack == 1:
+        if self.params.new_crack == 1:
             lda[mid_index] = (stress[int(self.params.N_elements/2)-1] + 
                               stress[int(self.params.N_elements/2)])/2
-            return lda, new_crack
+            return lda
         
         else:
             jump =  abs(disp[N_nodes_half-1] - disp[N_nodes_half] )
-            k = sigc**2 / self.params.Gc
-            wc = (2*self.params.Gc) / sigc
-
-            lda[mid_index]  = (sigc *(1-jump/wc)) + k*jump
             
-            return lda, new_crack
+            lda[mid_index]  = (self.params.sigc *(1-jump/self.params.wc)) + self.params.k*jump
+            
+            return lda
     
-    def compute_damage(self, d, d_prev, lda, sigc):
+    def values_w_t(self):
+    
+        d_test = np.linspace(0, 1, 100000)
+        D_test = self.params.Dm * d_test
+
+        k = self.params.k
+        yc = self.params.yc
+        Yc = self.params.Yc
+        lc = self.params.lc
+        E = self.params.E
+
+        gd = self.functions.gd_cohesive.get_value(d_test)
+        g1d = self.functions.gd_cohesive.get_first_derivative(d_test)
+        h1d =  self.functions.hd_cohesive.get_first_derivative(d_test)
+        GDmd = self.functions.GD_bulk.get_value(D_test)
+        HDmd = self.functions.HD_bulk.get_value(D_test)
+
+        t_test = np.sqrt((((yc*h1d)/2) + ((Yc*lc*HDmd)))/(((lc)/(2*E))*(1/GDmd -1) - ((g1d)/(4*k*gd**2))))
+        w_test = t_test/(k*gd)
+        
+        return w_test, t_test, d_test
+
+    def traction_predict(self, w_known, opt = True):
+
+        if w_known >= self.w_max and w_known <= self.params.wc:
+            self.w_max = w_known
+
+            w_test, t_test, d_test = self.values_w_t()
+            interp_function = interp1d(w_test, t_test, kind = 'linear',fill_value = 'extrapolate')
+            interp_damage_function = interp1d(w_test, d_test, kind = 'linear', fill_value = 'extrapolate')
+            t_predicted = interp_function(w_known)
+            d_predicted = interp_damage_function(w_known)
+            self.d_max = d_predicted
+
+        elif w_known > self.params.wc:            
+            t_predicted = 0
+            d_predicted = 1
+        
+        elif w_known < 0 :
+            t_predicted = 0
+            d_predicted = self.d_max
+            w_known = 0
+        
+        else :
+            t_predicted = self.params.k * self.functions.gd_cohesive.get_value(self.d_max) * w_known
+            d_predicted = self.d_max
+
+        if opt:
+            return t_predicted
+        else:
+            return t_predicted, d_predicted, w_known
+
+    def compute_lda_clip(self, disp, lda, stress):
+        mid_index = math.floor(len(lda)/2)
+        N_nodes_half = math.ceil(self.params.N_nodes / 2)
+
+        if self.params.new_crack == 0:
+            return lda
+
+        if self.params.new_crack == 1 :
+            lda[mid_index] = (stress[int(self.params.N_elements/2)-1] + stress[int(self.params.N_elements/2)])/2            
+            return lda
+        
+        else:
+            jump =  abs(disp[N_nodes_half-1] - disp[N_nodes_half])
+            lda[mid_index] = self.traction_predict(jump) + self.params.k*jump            
+            return lda
+
+    def compute_damage(self, d, d_prev, lda):
         
         def F(d):
-            k = sigc**2/self.params.Gc
-            lda_lda_on_k = (lda * lda)/k
-            return -0.5*np.dot(lda_lda_on_k,(self.functions.gd_cohesive.get_lmb_value(d))) + self.params.Gc*np.sum(self.functions.hd_cohesive.get_value(d))
-      
+            lda_lda_on_k = (lda * lda)/self.params.k
+            return -0.5*np.dot(lda_lda_on_k,(self.functions.gd_cohesive.get_lmb_value(d))) + self.params.yc*np.sum(self.functions.hd_cohesive.get_value(d))
+
         bounds = scipy.optimize.Bounds(d_prev, np.ones(len(d_prev)))
         damage_opt = scipy.optimize.minimize(
             fun = F,
             #jac = jacobian,
-            x0 = d_prev,
+            x0 = d,
             bounds = bounds,
             #method = 'SLSQP'
         )
@@ -680,8 +935,64 @@ class ExplicitSolver:
            raise RuntimeError("Optimization failed")
         return damage_opt.x
 
-    def get_strain(self, disp, new_crack):
-        if new_crack == 0:
+    def compute_damage_clip(self, d, d_prev, disp, lda):
+    
+        d1 = np.zeros(self.params.N_elements-1)
+        dtest = np.linspace(0,1,1000)
+        func_str = []
+        se_str = []
+        ce1_str = []
+        ce2_str = []
+        ce3_str = []
+        coh_dissip_str = []
+        bulk_dissip_str = []
+        for i in range(1000):
+
+                d1[math.floor((self.params.N_elements-1)/2)] = dtest[i]
+                D_center = self.bulk_damage.get_Bulk_damage(d1)
+                functional_1, se, ce1, ce2, ce3, coh_dissip, bulk_dissip = self.functional.assemble_clip_functional_4_terms_explicit_clip(d1, D_center, disp, lda, returnall = True)
+                func_str.append(functional_1)
+                se_str.append(se)
+                ce1_str.append(ce1)
+                ce2_str.append(ce2)
+                ce3_str.append(ce3)
+                coh_dissip_str.append(coh_dissip)
+                bulk_dissip_str.append(bulk_dissip)
+                
+        print("min func = ", min(func_str))
+        #print("lda = ", lda, lda[math.floor((self.params.N_elements-1)/2)])
+        plt.plot(dtest, func_str, label = ' Functional')
+        # plt.plot(dtest, se_str, label = ' Strain Energy')
+        # plt.plot(dtest, ce1_str, label = ' Cohesive Energy - 1')
+        # plt.plot(dtest, ce2_str, label = ' Cohesive Energy - 2')
+        # plt.plot(dtest, ce3_str, label = ' Cohesive Energy - 3')
+        # plt.plot(dtest, coh_dissip_str, label = ' Cohesive Dissipation')
+        # plt.plot(dtest, bulk_dissip_str, label = ' Bulk Dissipation')
+        plt.xlabel('Cohesive Damage', fontsize = 'large')
+        plt.ylabel('Functional (N/m)', fontsize = 'large')
+        plt.title('Functional (F) vs Cohesive damage (d)', fontweight = 'bold', fontsize = 'large')
+        
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        D_center = self.bulk_damage.get_Bulk_damage(d)
+        functional = lambda damage : self.functional.assemble_clip_functional_4_terms_explicit_clip(damage,D_center,disp, lda)
+        
+        bounds = scipy.optimize.Bounds(d_prev, np.ones(len(d_prev)))
+        damage_opt = scipy.optimize.minimize(
+            fun = functional,
+            #jac = jacobian,
+            x0 = d,
+            bounds = bounds,
+            #method = 'SLSQP'
+        )
+        if not damage_opt.success:
+           raise RuntimeError("Optimization failed")
+        return damage_opt.x
+
+    def get_strain(self, disp):
+        if self.params.new_crack == 0:
             return (disp[1:] - disp[:-1])/self.params.dx
         
         else:
@@ -698,41 +1009,47 @@ class ExplicitSolver:
             # Combine strains from both segments
             return np.concatenate((strain_left, strain_right))
 
-    def get_stress(self, disp, new_crack, d, lda, sigc):
+    def get_stress(self, disp, d, lda):
 
         N_nodes_half = math.ceil(self.params.N_nodes / 2)
         lda_mid = math.floor(len(lda) / 2)
 
-        if new_crack == 0 :
-            strain = self.get_strain(disp, new_crack)     
-            sig = self.params.E * strain
-            return sig, new_crack
+        if self.params.new_crack == 0 :
+            strain = self.get_strain(disp)     
+            sig = self.params.E * strain 
+            return sig, strain, sig
         
         else:
+            D_center = self.bulk_damage.get_Bulk_damage(d)
             disp_left = disp[: N_nodes_half]
             disp_right = disp[N_nodes_half: ]
 
             strain_left = (disp_left[1:] - disp_left[:-1])/self.params.dx
             strain_right = (disp_right[1:] - disp_right[:-1])/self.params.dx
-
-            sig_left = (self.params.E*strain_left)
-            sig_right = (self.params.E*strain_right)
-
-            if new_crack == 1 :       
-                traction = lda[lda_mid]
-                new_crack = 2
             
+            D_left = D_center[: N_nodes_half-1]
+            D_right = D_center[N_nodes_half-1:]
+            
+            sig_left = (self.params.E*strain_left* self.functions.GD_bulk.get_value(D_left))
+            sig_right = (self.params.E*strain_right*self.functions.GD_bulk.get_value(D_right))
+
+            sig_left_GD = (self.params.E*strain_left)
+            sig_right_GD = (self.params.E*strain_right)
+
+            if self.params.new_crack == 1 :       
+                traction = self.params.sigc
+                self.params.update_new_crack(2)
+                
             else:       
-                k = sigc**2 / self.params.Gc
                 jump =  abs(disp[N_nodes_half-1] - disp[N_nodes_half])
-                traction = k*(1/d[lda_mid] - 1)*jump
+                traction = self.params.k*(self.functions.gd_cohesive.get_value(d[lda_mid]))*jump
             
             sig_new = np.concatenate((sig_left, [traction], sig_right))
-            
-            return sig_new, new_crack 
+            sig_bulk = np.concatenate((sig_left, sig_right))
+            return sig_new , np.concatenate((strain_left, strain_right)), sig_bulk
 
-    def get_nodal_forces(self, stress, new_crack):
-        if new_crack == 0:
+    def get_nodal_forces(self, stress):
+        if self.params.new_crack == 0:
             nodal_forces = np.zeros(self.params.N_nodes)
             nodal_forces[0:self.params.N_nodes-1] += self.params.Area*stress
             nodal_forces[1:self.params.N_nodes] -= self.params.Area*stress
@@ -743,19 +1060,18 @@ class ExplicitSolver:
             nodal_forces[1:self.params.N_nodes+1] -= self.params.Area*stress
             return nodal_forces
 
-    def get_M_lumped(self, new_crack):
+    def get_M_lumped(self):
 
         element_mass = self.params.Area * self.params.rho * self.params.dx
         half_mass = element_mass / 2
         N_nodes = self.params.N_nodes
-        M = np.zeros(N_nodes + (1 if new_crack else 0))
+        M = np.zeros(N_nodes + (1 if self.params.new_crack else 0))
 
         M[1:-1] = element_mass
-
         M[0] = half_mass
         M[-1] = half_mass
 
-        if new_crack != 0 :
+        if self.params.new_crack != 0 :
             mid_index = math.ceil(N_nodes / 2) 
             M[mid_index - 1] = half_mass
             M[mid_index] = half_mass
@@ -763,18 +1079,27 @@ class ExplicitSolver:
         return M
 
     def compute_acceleration(self, force, mass):
-        return np.divide(force,mass)
+        return np.divide(force,mass, where=mass!=0)
 
     def compute_velocity(self, dt, vel, vel_predict, acc):
-        vel[1:-1] =  vel_predict + (dt/2)*acc[1:-1]
-        return vel
-    
-    def checkcohesivestress(self, disp, vel, acc, new_crack, sigc, stress):
+        if self.params.boundary_type == 'free' or self.params.boundary_type == 'string':
+            vel[1:] =  vel_predict + (dt/2)*acc[1:]
+            return vel
+        
+        elif self.params.boundary_type == 'imposed':
+            vel[1:-1] =  vel_predict + (dt/2)*acc[1:-1]
+            return vel
+            
+        elif self.params.boundary_type == 'small_case':
+            vel =  vel_predict + (dt/2)*acc
+            return vel
+    def checkcohesivestress(self, disp, vel, acc, stress):
         mid_elem = int(self.params.N_elements / 2)
         Stress_avg = (stress[mid_elem-1] + stress[mid_elem])/2
+        #Stress_avg = (stress[0] + stress[1])/2
         
-        if Stress_avg > sigc and new_crack == 0 :   
-                new_crack = 1
+        if Stress_avg > self.params.sigc and self.params.new_crack == 0 :   
+                self.params.update_new_crack(1)
                 mid_node = math.floor(self.params.N_nodes / 2)
 
                 disp = np.insert(disp, mid_node, disp[mid_node])
@@ -782,21 +1107,57 @@ class ExplicitSolver:
                 acc = np.insert(acc, mid_node, acc[mid_node])
 
                 sigc = Stress_avg
+                self.params.update_sigc(sigc)
         
-        return disp, vel, acc, new_crack, sigc
+        return disp, vel, acc
 
-    def Energy_computation(self, sigc, new_crack, disp, vel, lda, d):
+    def init_Energy_compute(self, disp, vel, lda, d, dt):
+        Area = self.params.Area
+        dx = self.params.dx
+        E = self.params.E
+
+        Epot, Ekin, Edissip = 0.0, 0.0, 0.0
+        ext_work = 0
+
+        strain = self.get_strain(disp)     
+        Epot = 0.5 * Area * dx * E *(np.dot(strain,strain))
+
+        M = self.get_M_lumped()
+        Ekin = 0.5 * np.dot((M* vel), vel)
+
+        Edissip =  self.params.yc * np.sum(self.functions.hd_cohesive.get_value(d)) * Area
+        
+        stress = self.get_stress(disp, d, lda)
+        ext_work = (stress[-1] * vel[-1] * Area* dt)
+
+        init_energy = {
+        "pot":Epot,
+        "kin": Ekin,
+        "dissip" : Edissip,
+        "ext": ext_work,
+        }
+
+        return init_energy
+
+    def Energy_computation(self, disp, vel, lda, d, stress, dt, Ext_work,  init_energy = None):
 
         Area = self.params.Area
         dx = self.params.dx
         E = self.params.E
         Gc = self.params.Gc
         N_nodes_half = math.ceil(self.params.N_nodes / 2) 
-        Epot, Ekin, Edissip = 0.0, 0.0, 0.0
+        Epot, Ekin, Edissip, Ecoh = 0.0, 0.0, 0.0, 0.0
+        Edissip_bulk, Edissip_coh = 0.0, 0.0
 
-        if new_crack == 0 :
-            strain = self.get_strain(disp, new_crack)     
-            Epot = 0.5 * Area * dx * E *(np.dot(strain,strain))
+        D_nodes, D, _ = self.bulk_damage.get_Bulk_damage(d, centeronly=False)
+ 
+        Ext_work += -((stress[-1]*vel[-1]*Area*dt) + (stress[0]*vel[0]*Area*dt))
+        #Ext_work += -(stress[-1]*disp[-1]*Area)
+
+        if self.params.new_crack == 0 :
+            strain = self.get_strain(disp)
+           
+            Epot = 0.5 * Area * dx * E *(np.dot((strain * strain),self.functions.GD_bulk.get_value(D)) )
 
         else :
             disp_left = disp[: N_nodes_half]
@@ -804,22 +1165,39 @@ class ExplicitSolver:
             
             strain_left = (disp_left[1:] - disp_left[:-1])/dx
             strain_right = (disp_right[1:] - disp_right[:-1])/dx
+            E_pot_left = 0.5 * Area  * dx * E *   (np.dot((strain_left *strain_left), self.functions.GD_bulk.get_value(D[:N_nodes_half-1])))
+            E_pot_right = 0.5 * Area  * dx * E * (np.dot((strain_right*strain_right), self.functions.GD_bulk.get_value(D[N_nodes_half-1:])))
 
-            E_pot_left = 0.5 * Area  * dx * E * (np.dot(strain_left,strain_left)) 
-            E_pot_right = 0.5 * Area  * dx * E * (np.dot(strain_right,strain_right))
-            
-            #k = sigc**2 / Gc
-            #jump =  abs(disp[N_nodes_half-1] - disp[N_nodes_half])
-            #traction = k * (1 / d[math.floor(len(lda)/2)] - 1) * jump if jump != 0 else 0
-            #+ traction * jump * Area
+            Epot = E_pot_left + E_pot_right
 
-            Epot = E_pot_left + E_pot_right 
-
-        M = self.get_M_lumped(new_crack)
+        M = self.get_M_lumped()
         Ekin = 0.5 * np.dot((M* vel), vel)
 
-        if new_crack != 0:
-            Edissip =  0.5 *Gc * np.sum(self.functions.hd_cohesive.get_value(d)) * Area
-            #Edissip = 0.5 * sigc * jump * Area
+        if self.params.new_crack !=0:
+            jump = np.zeros(self.params.N_elements-1)
+            jump[math.floor(self.params.N_elements / 2)-1] =  abs(disp[N_nodes_half-1] - disp[N_nodes_half])
+            
+            gd =  np.where(np.isinf(self.functions.gd_cohesive.get_value(d)), 0, self.functions.gd_cohesive.get_value(d))
+            
+            Ecoh = (0.5 * self.params.k * np.sum(gd * np.sum(jump**2)))*Area
 
-        return Epot, Ekin, Edissip
+        if self.params.new_crack != 0:
+            Edissip_coh =  self.params.yc * np.sum(self.functions.hd_cohesive.get_value(d)) * Area
+            Edissip_bulk = self.params.Yc * np.sum(self.functions.HD_bulk.get_value(D_nodes)) * Area * dx
+            
+            Edissip = Edissip_bulk + Edissip_coh
+
+        Epot_var = Epot 
+        Ekin_var = Ekin 
+        Edissip_var = Edissip 
+        Eext_var = Ext_work  
+
+        if self.params.boundary_type == 'free' or self.params.boundary_type == 'string' or self.params.boundary_type == 'small_case':
+            Total_energy = Epot_var + Ekin_var  + Edissip_var + Ecoh
+            
+        elif self.params.boundary_type == 'imposed':
+            Total_energy = Epot_var + Ekin_var  + Edissip_var + Ecoh + Ext_work
+
+
+            
+        return Epot_var, Ekin_var, Edissip_var, Eext_var, Ecoh, Total_energy, Edissip_bulk, Edissip_coh

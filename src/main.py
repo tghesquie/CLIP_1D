@@ -46,6 +46,9 @@ def main_clip(parameters, incs, terms):
     bulk_damage_str = []
     bulk_damage_overall_str = []
     lambda_str = []
+    pot_energy = []
+    coh_energy = []
+    total_energy = []
     cde_str = np.zeros(num_incs)
     cda_str = np.zeros(num_incs)
     bde_str = np.zeros(num_incs)
@@ -80,19 +83,22 @@ def main_clip(parameters, incs, terms):
         bulk_damage_str.append(D)
         bulk_damage_overall_str.append(D_overall)
         lambda_str.append(lambda_)
+        
 
         t1, t2, t3 = solver.functional.get_cohesive_energy_lagrange(solver.functional.get_jump(u_), lambda_, d)
         cda, bda = solver.functional.dissipation_act_bulk_coh(strain_str, stress_str, jump_str)
         bda = bda - solver.functional.get_strain_energy(solver.functional.get_strain(u_), D)
         cda = cda - (-t1 + t2 - t3)
-
+        pot_energy.append(solver.functional.get_potential_energy(u_, D))
+        coh_energy.append(solver.functional.get_cohesive_energy(d, solver.functional.get_jump(u_),lambda_ ))
+        
         cde_str[i] = cde
         cda_str[i] = cda
         bda_str[i] = bda
         bde_str[i] = bde
         tda_str[i] = cda + bda
         tde_str[i] = cde + bde 
-
+    total_energy = [a + b + c  for a, b,c in zip(pot_energy, coh_energy, tda_str)]
     results_dict = {
         'inputs': parameters.to_dict(),
         'imposed_disp': incs,
@@ -110,6 +116,10 @@ def main_clip(parameters, incs, terms):
         'coh_disp_exp': cde_str,
         'bulk_disp_exp': bde_str if terms == 4 else None,
         'tot_disp_exp': tde_str,
+        'potential_energy' : pot_energy,
+        'cohesive_energy' : coh_energy,
+        'total_energy' : total_energy,
+        
     }
     filename = generate_filename()
     np.savez(filename, **results_dict)
@@ -346,38 +356,38 @@ if __name__ == '__main__':
     E = 3e10
     Gc = 120
     sigc = 3e6
-    L = 0.2
-    Dm = 0.7
+    L = 0.4
+    Dm = 0.6
     alpha = np.pi/4
     beta = 0
     he = 10
     functional_choice = 'CLIP-4terms'
     N_increments = 30
     max_iter = 100
-    damage_function = 'hybrid'
+    damage_function = 'hybrid_k'
     
     parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
     incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.1, N_increments-1)))    
     result_1 = main_clip_4_terms(parameters_clip, incs_clip)
   
-    ###############################################################
-    damage_function = 'CZM'
-    functional_choice = 'CZM'
-    parameters_czm = initialize_parameters(damage_function = damage_function)
-    incs_czm =  np.concatenate((np.array([0]), np.linspace(parameters_czm.epsilon_0*L, parameters_czm.wc*1.5, N_increments-1))) 
-    result_2 = main_czm(parameters_czm, incs_czm)
+    # ###############################################################
+    # damage_function = 'CZM'
+    # functional_choice = 'CZM'
+    # parameters_czm = initialize_parameters(damage_function = damage_function)
+    # incs_czm =  np.concatenate((np.array([0]), np.linspace(parameters_czm.epsilon_0*L, parameters_czm.wc*1.5, N_increments-1))) 
+    # result_2 = main_czm(parameters_czm, incs_czm)
 
-    ###############################################################
-    damage_function = 'LIP'
-    functional_choice = 'LIP'
-    parameters_lip = initialize_parameters(damage_function = damage_function, alpha = alpha)
-    incs_lip =  np.concatenate((np.array([0]), np.linspace(parameters_lip.epsilon_0*L, parameters_lip.wc*1.5, N_increments-1))) 
-    result_3 = main_lip(parameters_lip, incs_lip)
+    # ###############################################################
+    # damage_function = 'LIP'
+    # functional_choice = 'LIP'
+    # parameters_lip = initialize_parameters(damage_function = damage_function, alpha = alpha)
+    # incs_lip =  np.concatenate((np.array([0]), np.linspace(parameters_lip.epsilon_0*L, parameters_lip.wc*1.5, N_increments-1))) 
+    # result_3 = main_lip(parameters_lip, incs_lip)
 
     ############################################################
-    functional_choice = 'Exact'
-    parameters_exact = initialize_parameters()
-    result_4 = main_exact_pure_czm(parameters_exact)
+    # functional_choice = 'Exact'
+    # parameters_exact = initialize_parameters()
+    # result_4 = main_exact_pure_czm(parameters_exact)
 
     ############################################################
 

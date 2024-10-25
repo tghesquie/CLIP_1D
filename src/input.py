@@ -27,7 +27,7 @@ class Simulation_Parameters:
         self.lch = (self.E * self.Gc) / (self.sigc ** 2)  # Cohesive zone length
         self.gamma = self.lc / self.lch  # gamma
         self.beta_1 = self.beta # Dissipation parameter
-        self.k = self.sigc / self.wc
+        self.k = (self.sigc / self.wc)
         self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate
         self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
         self.N_v = int(self.L / (self.lc / self.he)) - 1  # Number of vertices/nodes
@@ -46,6 +46,7 @@ class Simulation_Parameters:
             'sigc': self.sigc,
             'L': self.L,
             'Dm': self.Dm,
+            'dx': self.dx,
             'alpha': self.alpha,
             'beta': self.beta,
             'he': self.he,
@@ -57,7 +58,7 @@ class Simulation_Parameters:
         }
 
 class Explicit_Parameter:
-    def __init__(self, E, Gc, sigc, rho, L, Area, eps0dot, max_steps, N_elements):
+    def __init__(self, E, Gc, sigc, rho, L, Area, eps0dot, max_steps, N_elements, new_crack):
 
         self.E = E  # Young's Modulus (Pa)
         self.Gc = Gc  # Fracture Energy (N/m)
@@ -68,6 +69,7 @@ class Explicit_Parameter:
         self.eps0dot = eps0dot #strain rate (s^-1)
         self.max_steps = max_steps
         self.N_elements = N_elements
+        self.new_crack = new_crack
         self.calculate_derived_parameters()
         
 
@@ -76,11 +78,17 @@ class Explicit_Parameter:
         Computes the parameters : wc, lc, lch, gamma, k, Yc, yc, N_v, N_elements, x, dx, epsilon_0
         """
         self.wc = (2 * self.Gc) / self.sigc  # Critical Separation
-        self.k = self.sigc**2 / self.Gc
+        self.k = self.sigc**2 / (self.Gc)
         self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
         self.N_nodes = self.N_elements + 1  # Number of nodes
-        self.dx = self.L / self.N_elements  # Element size
-        
+        self.dx = self.L / self.N_elements  # Element size  
+
+    def update_sigc(self, new_sigc):
+        self.sigc = new_sigc
+        self.calculate_derived_parameters()
+
+    def update_new_crack(self, new_value):
+        self.new_crack = new_value
 
     def to_dict(self):
         return {
@@ -95,3 +103,67 @@ class Explicit_Parameter:
             
         }
        
+
+class Clip_Explicit_Parameters:
+    def __init__(self, E, Gc, sigc, rho, Area, eps0dot, L, Dm, max_steps, N_elements, new_crack, boundary_type, nlc):
+
+        self.E = E  # Young's Modulus (Pa)
+        self.Gc = Gc  # Fracture Energy (N/m)
+        self.sigc = sigc  # Stress Limit (N/m^2)
+        self.rho = rho
+        self.Area = Area
+        self.eps0dot = eps0dot #strain rate (s^-1)
+        self.L = L  # Length of the bar (m)
+        self.Dm = Dm  # Bulk Damage parameter
+        self.max_steps = max_steps
+        self.N_elements = N_elements
+        self.new_crack = new_crack
+        self.boundary_type = boundary_type
+        self.nlc = nlc
+
+        # Derived parameters
+        self.calculate_derived_parameters()
+
+    def calculate_derived_parameters(self):
+        """
+        Computes the parameters : wc, lc, lch, gamma, k, Yc, yc, N_v, N_elements, x, dx, epsilon_0
+        """
+        self.wc = (2 * self.Gc) / self.sigc  # Critical Separation
+        self.lc = self.L / self.nlc  # Characteristic length
+        self.lch = (self.E * self.Gc) / (self.sigc ** 2)  # Cohesive zone length
+        self.gamma = self.lc / self.lch  # gamma
+        self.k = self.sigc**2 / (self.Gc)
+        self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate
+        self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
+        self.N_nodes = self.N_elements + 1  # Number of nodes
+        self.dx = self.L / self.N_elements  # Element size
+        self.epsilon_0 = self.sigc / self.E  # Strain at the peak stress.
+        self.x = np.linspace(0., self.L, self.N_nodes)
+
+    def update_sigc(self, new_sigc):
+        self.sigc = new_sigc
+        self.calculate_derived_parameters()
+
+    def update_new_crack(self, new_value):
+        self.new_crack = new_value
+
+    def get_len_mat(self, x):
+        return np.abs(np.broadcast_to(x, (x.shape[0], x.shape[0])) - np.repeat(x, x.shape[0]).reshape((-1, x.shape[0])))
+
+
+    def to_dict(self):
+        return {
+            'E': self.E,
+            'Gc': self.Gc,
+            'sigc': self.sigc,
+            'wc' : self.wc,
+            'L': self.L,
+            'Area': self.Area,
+            'Dm' : self.Dm,
+            'nlc' : self.nlc,
+            'dx' : self.dx,
+            'eps0dot': self.eps0dot,
+            'max_steps': self.max_steps,
+            'N_elements' : self.N_elements
+            
+        }

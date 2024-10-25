@@ -155,7 +155,23 @@ class hd_cohesive_cos_D_squared_3_terms():
         num = ((d*(Dm*d - 1) + (2 - 2*d)*(Dm*d + d*(cos(Dm**2*alpha*d**2) - 1) - 1))*(Dm*d + Dm*(3*d - 2) - 2*d*(cos(Dm**2*alpha*d**2) - 1) + (2*d - 2)*(2*Dm**2*alpha*d**2*sin(Dm**2*alpha*d**2) - Dm - cos(Dm**2*alpha*d**2) + 1) - 1) + ((2*d - 2)*(Dm*d + d*(cos(Dm**2*alpha*d**2) - 1) - 1) - (3*d - 2)*(Dm*d - 1))*(-2*d*(cos(Dm**2*alpha*d**2) - 1) + (2*d - 2)*(2*Dm**2*alpha*d**2*sin(Dm**2*alpha*d**2) - Dm - cos(Dm**2*alpha*d**2) + 1) + 1))
         den = (d*(Dm*d - 1) + (2 - 2*d)*(Dm*d + d*(cos(Dm**2*alpha*d**2) - 1) - 1))**2
         return num/den
-    
+
+class hd_cohesive_k_E_lch():
+    def __init__(self):
+            return
+
+    def get_value(self,d):
+        """
+        Computes the h(d) function value based on the cohesive damage d.
+        """
+        return 2*d/(2-d)
+        
+    def get_first_derivative(self,d):
+        """
+        Computes the value of the first derivative of the h(d) function with respect to the cohesive damage d.
+        """
+        return -2/(d-2)**2
+
 class hd_cohesive_hybrid():
     def __init__(self,parameters):
         self.Dm = parameters.Dm
@@ -177,6 +193,28 @@ class hd_cohesive_hybrid():
         num = (Dm**2*d*(Dm*d - 2)*(Dm*d*(d - 1)*(Dm*d - 1) - d*(Dm - 1)*(Dm*d - 1) + d - 1)**2 + (Dm**2*d**2 - Dm*d + 1)**2*(-Dm*(d - 1)**2*(Dm*d - 1)**2 + Dm*(d - 1)**2 - d*(Dm - 1)*(Dm*d - 1)**2 + (Dm - 1)*(d - 1)*(Dm*d - 1)**2))
         den = ((Dm**2*d**2 - Dm*d + 1)**2*(Dm*d*(d - 1)*(Dm*d - 1) - d*(Dm - 1)*(Dm*d - 1) + d - 1)**2)
         return num/den
+
+class hd_cohesive_hybrid_k():
+        def __init__(self,parameters):
+            self.Dm = parameters.Dm
+
+        def get_value(self,d):
+            """
+            Computes the h(d) function value based on the cohesive damage d.
+            """
+            Dm = self.Dm
+            num = 2*d*(Dm**2*d**2*(Dm - 1) + 2*Dm*d*(1 - Dm) + Dm - 1)
+            den = (2*Dm**4*d**5 - 3*Dm**3*d**4*(Dm + 1) + 2*Dm**2*d**3*(3*Dm + 2) - 2*Dm*d**2*(4*Dm + 1) + d*(5*Dm + 1) - 2)
+            return num/den
+        
+        def get_first_derivative(self,d):
+            """
+            Computes the value of the first derivative of the h(d) function with respect to the cohesive damage d.
+            """
+            Dm = self.Dm
+            num = 2*(-d*(Dm**2*d**2*(Dm - 1) + 2*Dm*d*(1 - Dm) + Dm - 1)*(10*Dm**4*d**4 - 12*Dm**3*d**3*(Dm + 1) + 6*Dm**2*d**2*(3*Dm + 2) - 4*Dm*d*(4*Dm + 1) + 5*Dm + 1) + (3*Dm**2*d**2*(Dm - 1) - 4*Dm*d*(Dm - 1) + Dm - 1)*(2*Dm**4*d**5 - 3*Dm**3*d**4*(Dm + 1) + 2*Dm**2*d**3*(3*Dm + 2) - 2*Dm*d**2*(4*Dm + 1) + d*(5*Dm + 1) - 2))
+            den = (2*Dm**4*d**5 - 3*Dm**3*d**4*(Dm + 1) + 2*Dm**2*d**3*(3*Dm + 2) - 2*Dm*d**2*(4*Dm + 1) + d*(5*Dm + 1) - 2)**2
+            return num/den
 
 ################# G(D) for the CLIP model ###############################################
 
@@ -378,17 +416,14 @@ class HD_bulk_D_4_terms():
         den = (Dm*self.gamma*(2*D**3*alpha - D*Dm*(2*D*alpha + D - 1) + 2*Dm**2*(D - 1))**3)
         return num/den
     
-
 class HD_bulk_hybrid():
     """
     aD/(1-D)
     """
-    def __init__(self,parameters):
-        self.alpha = parameters.alpha
+    def __init__(self,parameters):        
         self.gamma = parameters.gamma
         self.Dm = parameters.Dm
-        self.beta = parameters.beta 
-        self.beta_1 = parameters.beta_1
+        
 
     def get_value(self,D):
         num = -D*self.Dm*(D - 2)
@@ -421,9 +456,16 @@ class Functions_4_terms:
             self.hd_cohesive = hd_cohesive_quad_4_terms(parameters)
             self.GD_bulk = GD_bulk_D(parameters)
             self.HD_bulk = HD_bulk_D_4_terms(parameters)
+
         elif self.damage_function == 'hybrid':
             self.gd_cohesive = gd_cohesive_hyd(parameters)
             self.hd_cohesive = hd_cohesive_hybrid(parameters)
+            self.GD_bulk = GD_bulk_hybrid(parameters)
+            self.HD_bulk = HD_bulk_hybrid(parameters)
+
+        elif self.damage_function == 'hybrid_k':
+            self.gd_cohesive = gd_cohesive_hyd(parameters)
+            self.hd_cohesive = hd_cohesive_hybrid_k(parameters)
             self.GD_bulk = GD_bulk_hybrid(parameters)
             self.HD_bulk = HD_bulk_hybrid(parameters)
 
@@ -538,46 +580,17 @@ class Functions_Lip:
 
 ################################################################
 
-class FixedDisplacement (aka.DirichletFunctor):
-    '''
-        Fix the displacement at its current value
-    '''
-
-    def __init__(self, axis, vel):
-        super().__init__(axis)
-        self.axis = axis
-        self.time = 0
-        self.vel = vel
-
-    def set_time(self, t):
-        self.time = t
-
-    def get_imposed_disp(self):
-        return self.vel*self.time
-        
-    def __call__(self, node, flags, disp, coord):
-        # sets the blocked dofs vector to true in the desired axis
-        flags[int(self.axis)] = True
-        disp[int(self.axis)] = self.get_imposed_disp()
-
-class hd_cohesive_explicit():
-    def __init__(self):
-            return
-
-    def get_value(self,d):
-        """
-        Computes the h(d) function value based on the cohesive damage d.
-        """
-        return d/(2 - d)
-
-    def get_first_derivative(self,d):
-        """
-        Computes the value of the first derivative of the h(d) function with respect to the cohesive damage d.
-        """
-        return -2/(d-2)**2
-
 class Functions_explicit_czm :
 
     def __init__(self):
         self.gd_cohesive = gd_cohesive_std()
-        self.hd_cohesive = hd_cohesive_explicit()
+        self.hd_cohesive = hd_cohesive_k_E_lch()
+
+class Functions_explicit_clip :
+    def __init__(self, parameters):
+        self.gd_cohesive = gd_cohesive_hyd(parameters)
+        self.hd_cohesive = hd_cohesive_hybrid_k(parameters)
+        self.GD_bulk = GD_bulk_hybrid(parameters)
+        self.HD_bulk = HD_bulk_hybrid(parameters)
+
+
