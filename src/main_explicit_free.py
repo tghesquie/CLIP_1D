@@ -51,7 +51,7 @@ class FixedDisplacement (aka.DirichletFunctor):
         disp[int(self.axis)] = self.get_imposed_disp()
 
 
-def Akantu_algorithm(material_file, mesh_file, parameters ):
+def Akantu_algorithm(dt,material_file, mesh_file, parameters ):
 
     aka.parseInput(material_file)
     spatial_dimension = 2
@@ -96,7 +96,7 @@ def Akantu_algorithm(material_file, mesh_file, parameters ):
     
     time = 0
     model.dump()
-    dt = model.getStableTimeStep()*0.1
+    #dt = model.getStableTimeStep()*0.1
     model.setTimeStep(dt)
 
     damage_mean = []
@@ -273,6 +273,38 @@ def Clip_opt_algorithm(dt, parameters):
     Ext_work_str = []
     Tot_str = []
 
+    results_dict = {
+        'inputs': parameters.to_dict(),
+        'time_step': dt,
+        'displacement': [],
+        'displacement_crack': [],
+        'velocity': [],
+        'velocity_crack': [],
+        'acceleration': [],
+        'acceleration_crack': [],
+        'nodes_str': [],
+        'nodes_str_crack': [],
+        'strain_str': [],
+        'stress_str': [],
+        'stress_crack_str': [],
+        'damage_mean': [],
+        'opening': [],
+        'bulk_damage_nodes': [],
+        'GD_function': [],
+        'potential_energy': [],
+        'kinetic_energy': [],
+        'dissipated_energy': [],
+        'dissipated_bulk_energy': [],
+        'dissipated_coh_energy': [],
+        'cohesive_energy': [],
+        'external_work': [],
+        'total_energy': [],
+        'total_energy_verlet' : [],
+        'coh_dissipation_actual': [],
+        'bulk_dissipation_actual' : [],
+        'total_dissipation_actual' :  []
+    }
+
     #Initial condition
     vel = nodes * eps0dot
 
@@ -283,62 +315,93 @@ def Clip_opt_algorithm(dt, parameters):
 
     logging.basicConfig(level=logging.INFO)
 
+    cohesive_dissipation = 0.0
+    traction_at_center = 0.0
+    bulk_dissipation = 0.0
+    bulk_dissipation_act = 0.0
+    previous_strain = 0.0
+    previous_Epot = 0.0
+    E_pot_test = 0.0
+    previous_strain_energy = 0.0
+    prev_jump = 0.0
+    delta_strain_energy = 0.0
+    strain_energy_actual = 0.0
+    previous_strain = 0.0
+    previous_stress = 0.0
+    cohesive_dissipation_act = 0.0
+    prev_traction = 0.0
+    prev_d = np.zeros(N_elements-1)
+    jump = 0.
+
     for step in tqdm(range(0, max_steps), desc = "Time steps"):
         
         logging.info("Starting time step %d", step)
 
         time += dt
 
-        disp[0] = 0
-        disp[-1]  = parameters.L * eps0dot * time
-    
         vel_predict = solver.velocity_predict(dt, vel, acc)
   
-        disp = solver.compute_displacement(dt, disp, vel_predict)       
+        disp = solver.compute_displacement(dt, disp, vel, acc, vel_predict)       
         
         lda = solver.compute_lda_clip(disp, lda, stress)
         d_previous = d.copy()
         if parameters.new_crack != 0: 
-            d = solver.compute_damage_clip(d, d_previous,disp, lda)
-            D_nodes, D, D_overall = solver.bulk_damage.get_Bulk_damage(d,centeronly = False)
+            d = solver.compute_damage_clip_gd(d, d_previous, disp)
+
+        D_nodes, D, D_overall = solver.bulk_damage.get_Bulk_damage(d,centeronly = False)
 
         d_str.append(d[math.floor((parameters.N_elements-1)/2)])
 
         logging.info(f"Damage at step {step}: {d}")
 
-        stress, strain, stress_bulk = solver.get_stress(disp, d, lda)
+        stress, strain, stress_bulk, traction = solver.get_stress(disp, d, lda)
 
         force = solver.get_nodal_forces(stress)
         mass = solver.get_M_lumped()
-
         acc = solver.compute_acceleration(force, mass)
 
         vel = solver.compute_velocity(dt, vel, vel_predict, acc)
      
+        energies = solver.Energy_computation(disp, vel, lda, d, stress, strain, dt, Ext_work)
+        
+        energies_verlet, strain_increment = solver.Energy_verlet_computation(disp, vel, vel_predict, d, stress_bulk,traction, strain, dt, Ext_work)
+
         disp, vel, acc = solver.checkcohesivestress(disp, vel, acc, stress)
 
-        Ep, Ekin, Edis, Ext_work, Ecoh, Total_energy, Edissip_bulk, Edissip_coh = solver.Energy_computation(disp, vel, lda, d, stress, dt,Ext_work, init_energy)
+        
+        if parameters.new_crack != 0 :
+            results_dict['nodes_str_crack'] = (solver.get_nodes())
+            results_dict['displacement_crack'].append(np.copy(disp))
+            results_dict['velocity_crack'].append(np.copy(vel))
+            results_dict['acceleration_crack'].append(np.copy(acc))
+            
+        else :
+            results_dict['nodes_str'] = (solver.get_nodes())
+            results_dict['displacement'].append(np.copy(disp))
+            results_dict['velocity'].append(np.copy(vel))
+            results_dict['acceleration'].append(np.copy(acc))
+            
+        results_dict['stress_str'].append(np.copy(stress_bulk))
+        results_dict['opening'].append(np.copy(jump))
+        results_dict['damage_mean'].append(np.copy(d[math.floor((parameters.N_elements-1)/2)]))
+        results_dict['bulk_damage_nodes'].append(np.copy(D_nodes))
+        results_dict['GD_function'].append(np.copy(functions.GD_bulk.get_value(D_nodes)))
+        results_dict['strain_str'].append(np.copy(strain))
+        results_dict['dissipated_energy'].append(np.copy(energies['Edissip']))
+        results_dict['dissipated_bulk_energy'].append(np.copy(energies['Edissip_bulk']))
+        results_dict['dissipated_coh_energy'].append(np.copy(energies['Edissip_coh']))
+        results_dict['potential_energy'].append(np.copy(energies_verlet['Epot']))
+        results_dict['kinetic_energy'].append(np.copy(energies_verlet['Ekin']))
+        results_dict['cohesive_energy'].append(np.copy(energies_verlet['Ecoh']))
+        results_dict['external_work'].append(np.copy(energies['Ext_work']))
+        results_dict['total_energy'].append(np.copy(energies['Total']))
+        results_dict['total_energy_verlet'].append(np.copy(energies_verlet['Total']))
 
-        Edis_str.append(Edis)
-        Ep_str.append(Ep)
-        Ekin_str.append(Ekin)
-        Ecoh_str.append(Ecoh)
-        Ext_work_str.append(Ext_work)
-        Tot_str.append(Total_energy)
+        results_dict['coh_dissipation_actual'].append(np.copy(energies_verlet['Edissip_coh']))
+        results_dict['bulk_dissipation_actual'].append(np.copy(energies_verlet['Edissip_bulk']))
+        results_dict['total_dissipation_actual'].append(np.copy(energies_verlet['Edissip']))
 
-        logging.info(f"Energy at step {step} - Potential: {Ep}, Kinetic: {Ekin}, Dissipated: {Edis}, External Work: {Ext_work}")
-
-    results_dict = {
-            'inputs': parameters.to_dict(),
-            'time_step': dt,
-            'damage_mean': d_str,
-            'potential_energy': Ep_str,
-            'kinetic_energy': Ekin_str,
-            'dissipated_energy': Edis_str,
-            'cohesive_energy': Ecoh_str,
-            'external_work': Ext_work_str,
-            'total_energy' : Tot_str
-    }
+        #logging.info(f"Energy at step {step} - Potential: {Ep}, Kinetic: {Ekin}, Dissipated: {Edis}, External Work: {Ext_work}")
 
     filename = generate_filename()
     np.savez(filename, **results_dict)
@@ -393,6 +456,7 @@ def Clip_no_opt_algorithm(dt, parameters):
         'nodes_str': [],
         'nodes_str_crack': [],
         'strain_str': [],
+        'strain_change_str': [],
         'stress_str': [],
         'stress_crack_str': [],
         'damage_mean': [],
@@ -407,6 +471,7 @@ def Clip_no_opt_algorithm(dt, parameters):
         'cohesive_energy': [],
         'external_work': [],
         'total_energy': [],
+        'total_energy_verlet' : [],
         'coh_dissipation_actual': [],
         'bulk_dissipation_actual' : [],
         'total_dissipation_actual' :  []
@@ -434,6 +499,9 @@ def Clip_no_opt_algorithm(dt, parameters):
     previous_stress = 0.0
     cohesive_dissipation_act = 0.0
     prev_traction = 0.0
+    prev_d = np.zeros(N_elements-1)
+
+    Ecoh_verlet = 0.0
 
     for step in tqdm(range(0, max_steps), desc = "Time steps"):
         print("")
@@ -454,39 +522,50 @@ def Clip_no_opt_algorithm(dt, parameters):
             traction_at_center, d[math.floor((parameters.N_elements-1)/2)], jump = solver.traction_predict(jump, opt = False)
             trac_average = (traction_at_center + prev_traction )/2
             cohesive_dissipation += trac_average * (jump - prev_jump) * parameters.Area
+            Ecoh_verlet = (0.5 * parameters.k * np.sum(functions.gd_cohesive.get_value(d[math.floor((parameters.N_elements-1)/2)]) * np.sum(jump*prev_jump)))*parameters.Area
+            
             prev_jump = jump
-            prev_traction = traction_at_center
+            #prev_traction = traction_at_center
 
         D_nodes, D, _ = bulk_damage.get_Bulk_damage(d, centeronly=False)
         
         logging.info(f"Damage at step {step}: {d}")
 
-        stress, strain, stress_bulk = solver.get_stress(disp, d, lda)
+        stress, strain, stress_bulk, traction = solver.get_stress(disp, d, lda)
 
-        nodal_forces = solver.get_nodal_forces(stress)        
+        nodal_forces = solver.get_nodal_forces(stress)
         mass = solver.get_M_lumped()
         acc = solver.compute_acceleration(nodal_forces, mass)
 
         vel = solver.compute_velocity(dt, vel, vel_predict, acc)
-     
-        disp, vel, acc = solver.checkcohesivestress(disp, vel, acc, stress)
-   
-        Ep, Ekin, Edis, Ext_work, Ecoh, Total_energy,Edissip_bulk, Edissip_coh  = solver.Energy_computation(disp, vel, lda, d, stress, dt,Ext_work)
+
+        # strain_increment = strain - previous_strain
+        # stress_average = (stress_bulk + previous_stress)/2
+
+        energies = solver.Energy_computation(disp, vel, lda, d, stress, strain, dt, Ext_work)
         
-   
-        strain_increment = strain - previous_strain
-        stress_average = (stress_bulk + previous_stress )/2
-        bulk_dissipation_increment = parameters.dx * parameters.Area * np.dot(stress_average , strain_increment)
-        bulk_dissipation += (bulk_dissipation_increment)
-        bulk_dissipation_act = (bulk_dissipation - Ep)
+        energies_verlet, strain_increment = solver.Energy_verlet_computation(disp, vel, vel_predict, d, stress_bulk,traction, strain, dt, Ext_work)
 
-        previous_strain = strain
-        previous_stress = stress_bulk
+        disp, vel, acc = solver.checkcohesivestress(disp, vel, acc, stress)
+        
+        # Ekin_verlet = np.sum(0.5 * mass[1:] * vel_predict * vel_predict)
+        # Epot_verlet = 0.5 * Area * parameters.dx * E *(np.dot((strain * previous_strain),functions.GD_bulk.get_value(D)))
+        # strain_increment = strain - previous_strain
+        # stress_average = (stress_bulk + previous_stress )/2
+        # bulk_dissipation_increment = parameters.dx * parameters.Area * np.dot(stress_average , strain_increment)
+        
+        # bulk_dissipation += (bulk_dissipation_increment)
+        # bulk_dissipation_act = (bulk_dissipation - Epot_verlet)
 
-        cohesive_dissipation_act = (cohesive_dissipation - Ecoh)
-        total_dissipation = bulk_dissipation_act + cohesive_dissipation_act
+        # previous_strain = strain
+        # prev_traction = traction_at_center
+        # previous_stress = stress_bulk
 
-        Total_energy = Ep + Ekin  + total_dissipation + Ecoh
+        # cohesive_dissipation_act = (cohesive_dissipation - Ecoh_verlet)
+        # total_dissipation = bulk_dissipation_act + cohesive_dissipation_act
+
+        # #Total_energy = Ep + Ekin  + total_dissipation + Ecoh
+        # Total_energy_verlet = Epot_verlet + Ekin_verlet + Ecoh_verlet + total_dissipation
         
         if parameters.new_crack != 0 :
             results_dict['nodes_str_crack'] = (solver.get_nodes())
@@ -506,24 +585,25 @@ def Clip_no_opt_algorithm(dt, parameters):
         results_dict['bulk_damage_nodes'].append(np.copy(D_nodes))
         results_dict['GD_function'].append(np.copy(functions.GD_bulk.get_value(D_nodes)))
         results_dict['strain_str'].append(np.copy(strain))
-        results_dict['dissipated_energy'].append(np.copy(Edis))
-        results_dict['dissipated_bulk_energy'].append(np.copy(Edissip_bulk))
-        results_dict['dissipated_coh_energy'].append(np.copy(Edissip_coh))
-        results_dict['potential_energy'].append(np.copy(Ep))
-        results_dict['kinetic_energy'].append(np.copy(Ekin))
-        results_dict['cohesive_energy'].append(np.copy(Ecoh))
-        results_dict['external_work'].append(np.copy(Ext_work))
-        results_dict['total_energy'].append(np.copy(Total_energy))
+        results_dict['strain_change_str'].append(np.copy(strain_increment))
+        results_dict['dissipated_energy'].append(np.copy(energies['Edissip']))
+        results_dict['dissipated_bulk_energy'].append(np.copy(energies['Edissip_bulk']))
+        results_dict['dissipated_coh_energy'].append(np.copy(energies['Edissip_coh']))
+        results_dict['potential_energy'].append(np.copy(energies_verlet['Epot']))
+        results_dict['kinetic_energy'].append(np.copy(energies_verlet['Ekin']))
+        results_dict['cohesive_energy'].append(np.copy(energies_verlet['Ecoh']))
+        results_dict['external_work'].append(np.copy(energies['Ext_work']))
+        results_dict['total_energy'].append(np.copy(energies['Total']))
+        results_dict['total_energy_verlet'].append(np.copy(energies_verlet['Total']))
 
-        results_dict['coh_dissipation_actual'].append(np.copy(cohesive_dissipation_act))
-        results_dict['bulk_dissipation_actual'].append(np.copy(bulk_dissipation_act))
-        results_dict['total_dissipation_actual'].append(np.copy(total_dissipation))
+        results_dict['coh_dissipation_actual'].append(np.copy(energies_verlet['Edissip_coh']))
+        results_dict['bulk_dissipation_actual'].append(np.copy(energies_verlet['Edissip_bulk']))
+        results_dict['total_dissipation_actual'].append(np.copy(energies_verlet['Edissip']))
 
     filename = generate_filename()
     np.savez(filename, **results_dict)
 
     return results_dict
-
 
 def compute_stiffness_matrix(N_elements, E, A, L_total):
     """
@@ -566,6 +646,7 @@ def compute_stiffness_matrix(N_elements, E, A, L_total):
         K_global[n1:n2+1, n1:n2+1] += K_element
     
     return K_global
+
 if __name__ == "__main__" :
 
     L = 1
@@ -575,19 +656,21 @@ if __name__ == "__main__" :
     sigc = 3e6
     Gc = 120
     eps0dot = 7
-    max_steps = 2000
-    Dm = 0.
-    N_elements = 40
+    N_elements = 160
+    max_steps = int(300/40*N_elements)
+    Dm = 0.6
     new_crack = 0
     boundary_type = "free"
-    nlc = 8
+    nlc = 16
     
     ################################
     mesh_file = "/home/ssshetty/Home/Main/Akantu/akantu/examples/c++/solid_mechanics_cohesive_model/test/len_bar/bar_40.msh"
     material_file = "/home/ssshetty/Home/Main/Akantu/akantu/examples/c++/solid_mechanics_cohesive_model/test/len_bar/material.dat"
 
+    c = np.sqrt(E/rho)
+    dt = 0.1 * ((L/N_elements)/c)
     parameters_akantu = initialize_parameters()
-    results_aka = Akantu_algorithm(material_file, mesh_file, parameters_akantu )
+    results_aka = Akantu_algorithm(dt, material_file, mesh_file, parameters_akantu )
 
     ###############################
 
@@ -597,26 +680,34 @@ if __name__ == "__main__" :
     ###############################
 
     paramters_opti_clip = initialize_parameters_clip()
-    # results_opti_clip = Clip_opt_algorithm(results_aka['time_step'], paramters_opti_clip)
-    c = np.sqrt(E/rho)
-    dt = 0.1 * ((L/N_elements)/c)
+    #results_opti_clip = Clip_opt_algorithm(results_aka['time_step'], paramters_opti_clip)
+
+    results_opti_clip = Clip_opt_algorithm(dt, paramters_opti_clip)
     
-    results_no_opti_clip = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip)
+    #results_no_opti_clip = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip)
     #results_no_opti_clip = Clip_no_opt_algorithm(dt, paramters_opti_clip)
 
-    # ###############################
-    Dm = 0.5
-    paramters_opti_clip_1 = initialize_parameters_clip()
-    results_no_opti_clip_1 = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip_1)
+    # # ###############################
+    # Dm = 0.2
+    # paramters_opti_clip_1 = initialize_parameters_clip()
+    # results_no_opti_clip_1 = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip_1)
+    # #results_opti_clip_1 = Clip_opt_algorithm(results_aka['time_step'], paramters_opti_clip_1)
     
-    Dm = 0.8
-    paramters_opti_clip_2 = initialize_parameters_clip()
-    results_no_opti_clip_2 = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip_2)
+    # Dm = 0.4
+    # paramters_opti_clip_2 = initialize_parameters_clip()
+    # results_no_opti_clip_2 = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip_2)
+    # #results_opti_clip_2 = Clip_opt_algorithm(results_aka['time_step'], paramters_opti_clip_2)
+
+    # Dm = 0.4
+    # paramters_opti_clip_2 = initialize_parameters_clip()
+    # results_no_opti_clip_2 = Clip_no_opt_algorithm(results_aka['time_step'], paramters_opti_clip_2)
     
     ###############################
     ###Post Process###
-    energies_comparison(results_aka,results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2)
-    #energies_comparison(results_no_opti_clip)
+    # velocity_along_the_bar(results_no_opti_clip)
+    # opening_along_time(results_aka['time_step'],results_no_opti_clip)
+    #energies_comparison(results_aka,results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2)
+    energies_comparison(results_aka, results_opti_clip)
     
     
     # velocity_along_the_bar(results_no_opti_clip)
@@ -629,9 +720,9 @@ if __name__ == "__main__" :
     # acceleration_along_bar_at_timestep(results_aka['time_step'], time_index, results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2 )
     # opening_along_time(results_aka['time_step'], results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2)
     
-    stress_strain_plot(results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2)
-    GD_function_value_along_bar(results_aka['time_step'], column_index, results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2,)
-    strain_at_timestep(results_aka['time_step'], column_index, results_no_opti_clip, results_no_opti_clip_1)
-    bulk_damage_at_nodes(results_no_opti_clip_1)
+    #stress_strain_plot(results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2)
+    #GD_function_value_along_bar(results_aka['time_step'], column_index, results_no_opti_clip, results_no_opti_clip_1, results_no_opti_clip_2,)
+    #strain_at_timestep(results_aka['time_step'], column_index, results_no_opti_clip, results_no_opti_clip_1)
+    #bulk_damage_at_nodes(results_no_opti_clip_1)
     # damage_comp_plot(results_aka['time_step'], max_steps, results_aka['damage_mean'], results_no_opti_clip['damage_mean'])
     # energy_comp_plot( max_steps,results_aka, results_no_opti_clip_2)

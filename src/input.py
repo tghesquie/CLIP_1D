@@ -27,11 +27,15 @@ class Simulation_Parameters:
         self.lch = (self.E * self.Gc) / (self.sigc ** 2)  # Cohesive zone length
         self.gamma = self.lc / self.lch  # gamma
         self.beta_1 = self.beta # Dissipation parameter
-        self.k = (self.sigc / self.wc)
+        self.k = self.E/self.lch
+        # self.k = self.sigc / (self.wc)
         self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate
         self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
-        self.N_v = int(self.L / (self.lc / self.he)) - 1  # Number of vertices/nodes
+        # self.N_v = int(self.L / (self.lc / self.he)) - 1  # Number of vertices/nodes
+        self.N_v = int(self.L / (self.lc / self.he)) + 1 # Number of vertices/nodes
+        # self.N_elements = self.N_v - 1  # Number of elements
         self.N_elements = self.N_v - 1  # Number of elements
+        print("N_elements = ", self.N_elements)
         self.x = np.linspace(0., self.L, self.N_v)  # grid parameter
         self.dx = self.L / self.N_elements  # Element size
         self.epsilon_0 = self.sigc / self.E  # Strain at the peak stress
@@ -49,6 +53,7 @@ class Simulation_Parameters:
             'dx': self.dx,
             'alpha': self.alpha,
             'beta': self.beta,
+            'gamma':self.gamma,
             'he': self.he,
             'functional_choice': self.functional_choice,
             'damage_function': self.damage_function,
@@ -103,9 +108,8 @@ class Explicit_Parameter:
             
         }
        
-
 class Clip_Explicit_Parameters:
-    def __init__(self, E, Gc, sigc, rho, Area, eps0dot, L, Dm, max_steps, N_elements, new_crack, boundary_type, nlc):
+    def __init__(self, E, Gc, sigc, rho, Area, eps0dot, L, Dm, max_steps, N_elements, new_crack, boundary_type, nlc, damage_function):
 
         self.E = E  # Young's Modulus (Pa)
         self.Gc = Gc  # Fracture Energy (N/m)
@@ -117,9 +121,11 @@ class Clip_Explicit_Parameters:
         self.Dm = Dm  # Bulk Damage parameter
         self.max_steps = max_steps
         self.N_elements = N_elements
+        self.N_elements_test = 2
         self.new_crack = new_crack
         self.boundary_type = boundary_type
         self.nlc = nlc
+        self.damage_function = damage_function
 
         # Derived parameters
         self.calculate_derived_parameters()
@@ -133,12 +139,14 @@ class Clip_Explicit_Parameters:
         self.lch = (self.E * self.Gc) / (self.sigc ** 2)  # Cohesive zone length
         self.gamma = self.lc / self.lch  # gamma
         self.k = self.sigc**2 / (self.Gc)
+        
         self.Yc = (0.5 * self.sigc ** 2) / self.E  # Critical Energy release rate
         self.yc = (0.5 * self.sigc ** 2) / self.k  # Critical Energy release rate - cohesive
         self.N_nodes = self.N_elements + 1  # Number of nodes
         self.dx = self.L / self.N_elements  # Element size
         self.epsilon_0 = self.sigc / self.E  # Strain at the peak stress.
         self.x = np.linspace(0., self.L, self.N_nodes)
+ 
 
     def update_sigc(self, new_sigc):
         self.sigc = new_sigc
@@ -164,6 +172,7 @@ class Clip_Explicit_Parameters:
             'dx' : self.dx,
             'eps0dot': self.eps0dot,
             'max_steps': self.max_steps,
-            'N_elements' : self.N_elements
+            'N_elements' : self.N_elements,
+            'gamma' : self.gamma,
             
         }

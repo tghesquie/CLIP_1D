@@ -56,6 +56,8 @@ def main_clip(parameters, incs, terms):
     tda_str = np.zeros(num_incs)
     tde_str = np.zeros(num_incs)
 
+    print("N_elements = ", N_elements)
+
     for i, u_t in enumerate(incs):
         bc[(2*N_elements-1)] = u_t
         if i == 2:
@@ -71,9 +73,12 @@ def main_clip(parameters, incs, terms):
         d = results.x
 
         _,D,D_overall = solver.bulk_damage.get_Bulk_damage(d,centeronly = False) 
-        u_, F_, lambda_, _ = solver.equilibrium_solver.solve_equilibrium_ul(d, D, bc)
+        u_, F_, lambda_, K = solver.equilibrium_solver.solve_equilibrium_ul(d, D, bc)
+        
         cde = solver.functional.get_cohesive_dissipation(d)
         bde = solver.functional.get_bulk_dissipation(D) if terms == 4 else None
+
+        # solver.functional_plot(d, d_prev, u_, lambda_)
 
         strain_str.append(solver.functional.get_strain(u_))
         stress_str.append(F_[-1])
@@ -90,7 +95,7 @@ def main_clip(parameters, incs, terms):
         bda = bda - solver.functional.get_strain_energy(solver.functional.get_strain(u_), D)
         cda = cda - (-t1 + t2 - t3)
         pot_energy.append(solver.functional.get_potential_energy(u_, D))
-        coh_energy.append(solver.functional.get_cohesive_energy(d, solver.functional.get_jump(u_),lambda_ ))
+        coh_energy.append(solver.functional.get_cohesive_energy_lda(d, solver.functional.get_jump(u_),lambda_ ))
         
         cde_str[i] = cde
         cda_str[i] = cda
@@ -234,8 +239,16 @@ def main_lip(parameters, incs):
     displacement_str = []    
     bulk_damage_str = []
     stress_str = []
-    strain_str =[]   
+    strain_str =[]
+    cda_str = []
+    bda_str = []
+    tda_str = []
+    cde_str = []
+    bde_str = []
+    tde_str = []
+    strain_energy_str = []
 
+    
     for i, u_t in enumerate(incs):
 
         print('inc', i, 'imposed u(L) : ',  u_t)
@@ -269,12 +282,24 @@ def main_lip(parameters, incs):
             print("Norm_delta_d = ", normdeltad,"Norm_delta_u = ",normdeltau)
             if ( normdeltad < tol) & (normdeltau <= tol) : 
                 stop = True
-            
+
+        bde = solver.functional.get_bulk_dissipation(D) 
+
         displacement_str.append(u_fun)
         stress_str.append(F_fun[-1])
         bulk_damage_str.append(D)
         strain_str.append(solver.functional.get_strain_lip(u_fun))
-            
+
+        bde_str.append(bde)
+        cde_str.append(0)
+        tde_str.append(bde)
+        strain_energy_str.append(solver.functional.get_strain_energy(solver.functional.get_strain_lip(u_fun), D))
+        bda = solver.functional.dissipation_act_bulk_coh_lip(strain_str, stress_str)
+        bda_str.append(bda -solver.functional.get_strain_energy(solver.functional.get_strain_lip(u_fun),D) )
+        cda_str.append(0)
+        tda_str.append(bda -solver.functional.get_strain_energy(solver.functional.get_strain_lip(u_fun),D) )
+
+    print(bde_str)
     results_dict = {
         'inputs': parameters.to_dict(),
         'imposed_disp': incs,
@@ -282,6 +307,12 @@ def main_lip(parameters, incs):
         'displacement': displacement_str,
         'bulk_damage': bulk_damage_str,
         'strain': strain_str,
+        'coh_disp_act': cda_str,
+        'bulk_disp_act': bda_str,
+        'tot_disp_act': tda_str,
+        'coh_disp_exp': cde_str,
+        'bulk_disp_exp': bde_str,
+        'tot_disp_exp': tde_str,
     }
     filename = generate_filename()
     np.savez(filename, **results_dict )
@@ -319,6 +350,287 @@ def main_exact_pure_czm(parameters):
 
     return results_dict
 
+def main_alt_clip(parameters, incs):
+    """
+    Main function for the CLIP functional with specified terms
+    """
+    print("------------------------------------------------")
+    print(f"Start : {parameters.functional_choice}, Dm = {parameters.Dm}")
+    print("------------------------------------------------")
+
+    N_elements = parameters.N_elements
+    print(N_elements)
+    
+    num_incs = len(incs)
+
+    u_ = np.zeros(2 * N_elements)
+    d_prev = np.zeros(N_elements - 1)
+    d = np.zeros(N_elements - 1)
+    D = np.zeros(N_elements)
+    bc = {0: 0, (2*N_elements-1): 0}
+
+    functions = Functions_4_terms(parameters) 
+    solver = Solver(functions, parameters)
+
+    strain_str = []
+    stress_str = []
+    jump_str = []
+    displacement_str = []
+    coh_damage_str = []
+    bulk_damage_str = []
+    bulk_damage_overall_str = []
+    lambda_str = []
+    pot_energy = []
+    coh_energy = []
+    total_energy = []
+    cde_str = np.zeros(num_incs)
+    cda_str = np.zeros(num_incs)
+    bde_str = np.zeros(num_incs)
+    bda_str = np.zeros(num_incs)
+    tda_str = np.zeros(num_incs)
+    tde_str = np.zeros(num_incs)
+
+    for i, u_t in enumerate(incs):
+        bc[(2*N_elements-1)] = u_t
+        iteration = 0
+        stop = False
+
+        print("--------------------------------")
+        print(f"Increment : {i}, ut = {u_t}")
+
+        while iteration < max_iter and not stop:
+            u_prev = u_.copy()
+
+            if i == 2 :
+                d_prev = np.zeros(N_elements - 1)
+                d_prev[int((N_elements - 1)/2)] = 0.1
+            else:
+                d_prev = d.copy()
+        
+            _, D, D_overall = solver.bulk_damage.get_Bulk_damage(d, centeronly = False)
+
+            u_, F_fun, K = solver.equilibrium_solver.solve_equilibrium_u(d, D, bc)
+        
+            print('u,lamb solved , energy =', solver.functional.assemble_clip_functional_gd_4_terms(d, u_))
+            # print("K = ", K)
+            results = solver.solve_gd_functional(d, d_prev, u_)
+            d = results.x
+            print(solver.functional.assemble_clip_functional_gd_4_terms(d, u_,returnall = True))
+            print('d solved , energy =', solver.functional.assemble_clip_functional_gd_4_terms(d, u_))
+            
+            print("d = ", d[int((N_elements - 1)/2)])
+            
+            iteration += 1
+
+            norm_delta_fun = np.linalg.norm(solver.functional.assemble_clip_functional_gd_4_terms(d, u_) - solver.functional.assemble_clip_functional_gd_4_terms(d_prev, u_prev))/np.linalg.norm(solver.functional.assemble_clip_functional_gd_4_terms(d, u_))
+
+            if norm_delta_fun < 1e-5 or i == 0:
+                stop = True
+            print("it = ",iteration,"nrm_fun = ",norm_delta_fun)
+
+        # solver.functional_gd_plot(d, d_prev, u_, lambda_)
+        # func, se, ce, bd,cd = solver.functional.assemble_clip_functional_4_terms(d, D , u_, lambda_, returnall = True)
+        # print("Functional =", func, se, ce, bd, cd)
+        u_, F_, K = solver.equilibrium_solver.solve_equilibrium_u(d, D, bc)
+        
+        # print("K =", K, F_)
+        cde = solver.functional.get_cohesive_dissipation(d)
+        bde = solver.functional.get_bulk_dissipation(D) 
+
+        strain_str.append(solver.functional.get_strain(u_))
+        stress_str.append(F_[-1])
+        jump_str.append(solver.functional.get_jump(u_))
+        displacement_str.append(u_)
+        coh_damage_str.append(d)
+        bulk_damage_str.append(D)
+        bulk_damage_overall_str.append(D_overall)
+        
+        t1 = solver.functional.get_cohesive_energy(solver.functional.get_jump(u_), d)
+        cda, bda = solver.functional.dissipation_act_bulk_coh(strain_str, stress_str, jump_str)
+        bda = bda - solver.functional.get_strain_energy(solver.functional.get_strain(u_), D)
+        cda = cda - (t1)
+        pot_energy.append(solver.functional.get_potential_energy(u_, D))
+        coh_energy.append(solver.functional.get_cohesive_energy(solver.functional.get_jump(u_), d))
+        
+        cde_str[i] = cde
+        cda_str[i] = cda
+        bda_str[i] = bda
+        bde_str[i] = bde
+        tda_str[i] = cda + bda
+        tde_str[i] = cde + bde 
+    total_energy = [a + b + c  for a, b,c in zip(pot_energy, coh_energy, tda_str)]
+    results_dict = {
+        'inputs': parameters.to_dict(),
+        'imposed_disp': incs,
+        'stress': stress_str,
+        'seperation': jump_str,
+        'displacement': displacement_str,
+        'cohesive_damage': coh_damage_str,
+        'bulk_damage': bulk_damage_str,
+        'bulk_damage_overall': bulk_damage_overall_str,
+        'lmb': lambda_str,
+        'strain': strain_str,
+        'coh_disp_act': cda_str,
+        'bulk_disp_act': bda_str,
+        'tot_disp_act': tda_str,
+        'coh_disp_exp': cde_str,
+        'bulk_disp_exp': bde_str,
+        'tot_disp_exp': tde_str,
+        'potential_energy' : pot_energy,
+        'cohesive_energy' : coh_energy,
+        'total_energy' : total_energy,
+        
+    }
+    filename = generate_filename()
+    np.savez(filename, **results_dict)
+    print("------------------------------------------------")
+    print(f"End : {parameters.functional_choice}, Dm = {parameters.Dm}")
+    print("------------------------------------------------")
+
+    return results_dict
+
+def main_alt_lda_clip(parameters, incs):
+    """
+    Main function for the CLIP functional with specified terms
+    """
+    print("------------------------------------------------")
+    print(f"Start : {parameters.functional_choice}, Dm = {parameters.Dm}")
+    print("------------------------------------------------")
+
+    N_elements = parameters.N_elements
+    num_incs = len(incs)
+
+    u_ = np.zeros(2 * N_elements)
+    d_prev = np.zeros(N_elements - 1)
+    d = np.zeros(N_elements - 1)
+    D = np.zeros(N_elements)
+    lambda_ = np.zeros(N_elements - 1)
+    bc = {0: 0, (2*N_elements-1): 0}
+
+    functions = Functions_4_terms(parameters) 
+    solver = Solver(functions, parameters)
+
+    strain_str = []
+    stress_str = []
+    jump_str = []
+    displacement_str = []
+    coh_damage_str = []
+    bulk_damage_str = []
+    bulk_damage_overall_str = []
+    lambda_str = []
+    pot_energy = []
+    coh_energy = []
+    total_energy = []
+    cde_str = np.zeros(num_incs)
+    cda_str = np.zeros(num_incs)
+    bde_str = np.zeros(num_incs)
+    bda_str = np.zeros(num_incs)
+    tda_str = np.zeros(num_incs)
+    tde_str = np.zeros(num_incs)
+
+    for i, u_t in enumerate(incs):
+        bc[(2*N_elements-1)] = u_t
+        print("--------------------------------")
+        print(f"Increment : {i}, ut = {u_t}")
+        u_, lambda_, d , D = solver.solve_alt_ulda_d(d_prev, u_, lambda_, bc, (i==2),i)
+        d_prev = d.copy()
+        # iteration = 0
+        # stop = False
+        # d_0 = d.copy()
+
+        # while iteration < max_iter and not stop:
+        #     u_prev = u_.copy()
+        #     lmb_prev = lambda_.copy()
+
+        #     if i == 2 :
+        #         d_prev = np.zeros(N_elements - 1)
+        #         d_prev[int((N_elements - 1)/2)] = 0.1
+        #     else:
+        #         d_prev = d.copy()
+        
+        #     D_prev = D.copy()
+
+        #     _, D, D_overall = solver.bulk_damage.get_Bulk_damage(d,centeronly = False)
+
+        #     u_, F_fun, lambda_, K = solver.equilibrium_solver.solve_equilibrium_ul(d, D, bc)
+        #     # print(K)
+        
+        #     print('u,lamb solved , energy =', solver.functional.assemble_clip_functional_4_terms(d, u_, lambda_) )
+        #     results = solver.solve_lda_functional(d, d_prev, u_, lambda_)
+        #     d = results.x
+        #     print('d solved , energy =', solver.functional.assemble_clip_functional_4_terms(d, u_, lambda_))
+            
+        #     print("d = ", d[int((N_elements - 1)/2)])
+            
+        #     iteration += 1
+
+        #     norm_delta_fun = np.linalg.norm(solver.functional.assemble_clip_functional_4_terms(d, u_, lambda_) - solver.functional.assemble_clip_functional_4_terms(d_prev , u_prev, lmb_prev))/np.linalg.norm(solver.functional.assemble_clip_functional_4_terms(d, u_, lambda_))
+
+        #     if norm_delta_fun < 1e-8  or i == 0:
+        #         stop = True
+        #     print("it = ",iteration,"nrm_fun = ",norm_delta_fun)
+
+        # solver.functional_gd_plot(d, d_prev, u_, lambda_)
+        # func, se, ce, bd,cd = solver.functional.assemble_clip_functional_4_terms(d, D , u_, lambda_, returnall = True)
+        # print("Functional =", func, se, ce, bd, cd)
+        u_, F_, lambda_,  K = solver.equilibrium_solver.solve_equilibrium_ul(d, D, bc)
+        # print("K =", K, F_)
+        cde = solver.functional.get_cohesive_dissipation(d)
+        bde = solver.functional.get_bulk_dissipation(D) 
+
+        strain_str.append(solver.functional.get_strain(u_))
+        stress_str.append(F_[-1])
+        jump_str.append(solver.functional.get_jump(u_))
+        displacement_str.append(u_)
+        coh_damage_str.append(d)
+        bulk_damage_str.append(D)
+        bulk_damage_overall_str.append(D)
+        lambda_str.append(lambda_)
+        
+        t1, t2, t3 = solver.functional.get_cohesive_energy_lagrange(solver.functional.get_jump(u_), lambda_, d)
+        cda, bda = solver.functional.dissipation_act_bulk_coh(strain_str, stress_str, jump_str)
+        bda = bda - solver.functional.get_strain_energy(solver.functional.get_strain(u_), D)
+        cda = cda - (-t1 + t2 - t3)
+        pot_energy.append(solver.functional.get_potential_energy(u_, D))
+        coh_energy.append(solver.functional.get_cohesive_energy_lda(d, solver.functional.get_jump(u_),lambda_ ))
+        
+        cde_str[i] = cde
+        cda_str[i] = cda
+        bda_str[i] = bda
+        bde_str[i] = bde
+        tda_str[i] = cda + bda
+        tde_str[i] = cde + bde 
+    total_energy = [a + b + c  for a, b,c in zip(pot_energy, coh_energy, tda_str)]
+    results_dict = {
+        'inputs': parameters.to_dict(),
+        'imposed_disp': incs,
+        'stress': stress_str,
+        'seperation': jump_str,
+        'displacement': displacement_str,
+        'cohesive_damage': coh_damage_str,
+        'bulk_damage': bulk_damage_str,
+        'bulk_damage_overall': bulk_damage_overall_str,
+        'lmb': lambda_str,
+        'strain': strain_str,
+        'coh_disp_act': cda_str,
+        'bulk_disp_act': bda_str,
+        'tot_disp_act': tda_str,
+        'coh_disp_exp': cde_str,
+        'bulk_disp_exp': bde_str,
+        'tot_disp_exp': tde_str,
+        'potential_energy' : pot_energy,
+        'cohesive_energy' : coh_energy,
+        'total_energy' : total_energy,
+        
+    }
+    filename = generate_filename()
+    np.savez(filename, **results_dict)
+    print("------------------------------------------------")
+    print(f"End : {parameters.functional_choice}, Dm = {parameters.Dm}")
+    print("------------------------------------------------")
+
+    return results_dict
+    
 if __name__ == '__main__':
 
     ################################################################
@@ -356,19 +668,28 @@ if __name__ == '__main__':
     E = 3e10
     Gc = 120
     sigc = 3e6
-    L = 0.4
-    Dm = 0.6
-    alpha = np.pi/4
+    L = 0.2
+    Dm = 0.8
+    alpha = np.pi/2
     beta = 0
-    he = 10
+    he = 20
     functional_choice = 'CLIP-4terms'
-    N_increments = 30
-    max_iter = 100
-    damage_function = 'hybrid_k'
-    
+    N_increments = 32
+    max_iter = 1000
+    damage_function = 'hybrid_1'
+
     parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
-    incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.1, N_increments-1)))    
+    incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.5, N_increments-1)))    
     result_1 = main_clip_4_terms(parameters_clip, incs_clip)
+
+    # ###############################################################
+    # parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
+    # incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.1, N_increments-1)))    
+    # result_1 = main_alt_clip(parameters_clip, incs_clip)
+
+    # parameters_clip = initialize_parameters(damage_function, Dm, alpha,)
+    # incs_clip =  np.concatenate((np.array([0]), np.linspace(parameters_clip.epsilon_0*L, parameters_clip.wc*1.1, N_increments-1)))    
+    # result_1 = main_alt_lda_clip(parameters_clip, incs_clip)
   
     # ###############################################################
     # damage_function = 'CZM'
@@ -377,14 +698,14 @@ if __name__ == '__main__':
     # incs_czm =  np.concatenate((np.array([0]), np.linspace(parameters_czm.epsilon_0*L, parameters_czm.wc*1.5, N_increments-1))) 
     # result_2 = main_czm(parameters_czm, incs_czm)
 
-    # ###############################################################
+    # ################################################################
     # damage_function = 'LIP'
     # functional_choice = 'LIP'
     # parameters_lip = initialize_parameters(damage_function = damage_function, alpha = alpha)
     # incs_lip =  np.concatenate((np.array([0]), np.linspace(parameters_lip.epsilon_0*L, parameters_lip.wc*1.5, N_increments-1))) 
     # result_3 = main_lip(parameters_lip, incs_lip)
 
-    ############################################################
+    # ############################################################
     # functional_choice = 'Exact'
     # parameters_exact = initialize_parameters()
     # result_4 = main_exact_pure_czm(parameters_exact)
